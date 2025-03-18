@@ -4,4 +4,4 @@ psycopg2-binary
 fastexcel
 pandas
 python-dotenv
-
+pre-commit
