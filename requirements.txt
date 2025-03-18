@@ -1,0 +1,6 @@
+polars
+SQLAlchemy
+psycopg2-binary
+fastexcel
+pandas
+
