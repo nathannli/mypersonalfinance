@@ -1,6 +1,7 @@
 polars
 SQLAlchemy
-psycopg2-binary
+psycopg-binary
+psycopg
 fastexcel
 pandas
 python-dotenv
