@@ -40,7 +40,7 @@ def load_amex_data(file_path: str) -> pl.DataFrame:
     # Find the header row that contains 'Date', 'Description', 'Amount'
     header_row = None
     for i, row in enumerate(df.iter_rows()):
-        if 'Date' in row and 'Description' in row and 'Amount' in row:
+        if "Date" in row and "Description" in row and "Amount" in row:
             header_row = i
             break
 
@@ -49,14 +49,20 @@ def load_amex_data(file_path: str) -> pl.DataFrame:
         sys.exit(1)
 
     # Filter rows after the header row and drop unnecessary columns
-    df1 = df.with_row_index().filter(pl.col("index") > header_row).drop("index", "column_3")
+    df1 = (
+        df.with_row_index()
+        .filter(pl.col("index") > header_row)
+        .drop("index", "column_3")
+    )
 
     # Rename columns to more descriptive names
-    df2 = df1.rename({
-        "column_1": "date",
-        "column_2": "merchant",
-        "column_4": "cost",
-    })
+    df2 = df1.rename(
+        {
+            "column_1": "date",
+            "column_2": "merchant",
+            "column_4": "cost",
+        }
+    )
 
     # Convert date strings to date objects
     df3 = df2.with_columns(pl.col("date").str.to_date(format="%d %b %Y"))
@@ -90,18 +96,16 @@ def load_rogers_data(file_path: str) -> pl.DataFrame:
     df = pl.read_csv(source=file_path, has_header=True)
 
     # Rename columns to standardized names
-    df1 = df.rename({
-        "Date": "date",
-        "Merchant Name": "merchant",
-        "Amount": "cost"
-    })
+    df1 = df.rename({"Date": "date", "Merchant Name": "merchant", "Amount": "cost"})
 
     # Select only the columns we need
-    df2 = df1.select([
-        "date",
-        "merchant",
-        "cost",
-    ])
+    df2 = df1.select(
+        [
+            "date",
+            "merchant",
+            "cost",
+        ]
+    )
 
     # Convert date strings to date objects
     df3 = df2.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
@@ -115,7 +119,7 @@ def load_rogers_data(file_path: str) -> pl.DataFrame:
     return df5
 
 
-def load_config(filename='database.ini', section='postgresql') -> dict:
+def load_config(filename="database.ini", section="postgresql") -> dict:
     """
     Load database configuration from a configuration file.
 
@@ -139,11 +143,13 @@ def load_config(filename='database.ini', section='postgresql') -> dict:
         for param in params:
             config[param[0]] = param[1]
     else:
-        raise Exception('Section {0} not found in the {1} file'.format(section, filename))
+        raise Exception(
+            "Section {0} not found in the {1} file".format(section, filename)
+        )
     return config
 
 
-def insert_to_postgres(query: str, args: tuple) -> int:
+def postgres_insert(query: str, args: tuple) -> int:
     """
     Execute a SQL query with parameters against a PostgreSQL database.
 
@@ -189,8 +195,14 @@ def insert_to_postgres(df: pl.DataFrame) -> int:
     """
 
     # Get reference tables for categories and subcategories
-    categories = pl.read_database(query="select id as category_id, name as category from categories", connection=POLARS_CONNECTION_STRING)
-    subcategories = pl.read_database(query="select id as subcategory_id, name as subcategory from subcategories", connection=POLARS_CONNECTION_STRING)
+    categories = pl.read_database(
+        query="select id as category_id, name as category from categories",
+        connection=POLARS_CONNECTION_STRING,
+    )
+    subcategories = pl.read_database(
+        query="select id as subcategory_id, name as subcategory from subcategories",
+        connection=POLARS_CONNECTION_STRING,
+    )
 
     # For each row in df, check if (date, merchant, cost) exists in expenses table
     # If it does, skip it
@@ -210,7 +222,9 @@ def insert_to_postgres(df: pl.DataFrame) -> int:
             continue
         else:
             # Ask user to choose category and subcategory for new transaction
-            print(f"Transaction on {date} for {merchant} with cost {cost} not found in expenses table")
+            print(
+                f"Transaction on {date} for {merchant} with cost {cost} not found in expenses table"
+            )
 
             # Display available categories
             print("Categories:")
@@ -228,24 +242,33 @@ def insert_to_postgres(df: pl.DataFrame) -> int:
 
             # Insert the transaction with user-selected categories
             query = f"insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
-            insert_to_postgres(query=query, args=(date, merchant, cost, category_id, subcategory_id))
+            postgres_insert(
+                query=query, args=(date, merchant, cost, category_id, subcategory_id)
+            )
             new_inserted_rows += 1
 
-    print(f"Successfully inserted {new_inserted_rows}/{df.height} rows into finance.expenses")
+    print(
+        f"Successfully inserted {new_inserted_rows}/{df.height} rows into finance.expenses"
+    )
     return new_inserted_rows
-
-
 
 
 if __name__ == "__main__":
     import argparse
 
     # Set up argument parser
-    parser = argparse.ArgumentParser(description="Load credit card data into PostgreSQL database")
-    parser.add_argument("--type", choices=["amex", "rogers"], required=True,
-                        help="Type of credit card data to process (amex or rogers)")
-    parser.add_argument("--filepath", required=True,
-                        help="Path to the credit card data file")
+    parser = argparse.ArgumentParser(
+        description="Load credit card data into PostgreSQL database"
+    )
+    parser.add_argument(
+        "--type",
+        choices=["amex", "rogers"],
+        required=True,
+        help="Type of credit card data to process (amex or rogers)",
+    )
+    parser.add_argument(
+        "--filepath", required=True, help="Path to the credit card data file"
+    )
 
     # Parse arguments
     args = parser.parse_args()
