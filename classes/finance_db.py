@@ -15,7 +15,7 @@ class FinanceDB(PostgresDB):
         """
         query = "select category_id from subcategories where id = %s"
         return self.select(query, (subcategory_id,))[0][0]
-    
+
     def get_subcategory_and_category(self) -> pl.DataFrame:
         """
         Get all subcategories and categories.
