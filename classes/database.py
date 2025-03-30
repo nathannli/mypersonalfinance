@@ -9,20 +9,20 @@ class PostgresDB(ABC):
     """
     Abstract base class for Postgres databases.
     """
-    schema_name: str
+    database_name: str
     debug: bool
 
-    def __init__(self, schema_name: str, debug: bool = False):
+    def __init__(self, database_name: str, debug: bool = False):
         """
         Initialize the PostgresDB instance.
         """
         load_dotenv()
         self.uri = os.getenv("POSTGRES_CONNECTION_STRING")
-        self.schema_name = schema_name
+        self.database_name = database_name
         self.debug = debug
         if self.debug:
             print(f"{self.uri=}")
-            print(f"{self.schema_name=}")
+            print(f"{self.database_name=}")
 
     def connect(self) -> psycopg.Connection:
         """

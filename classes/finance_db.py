@@ -6,8 +6,8 @@ class FinanceDB(PostgresDB):
     pl.Config.set_fmt_str_lengths(900)
     pl.Config.set_tbl_width_chars(900)
 
-    def __init__(self, debug: bool = False):
-        super().__init__(schema_name="finance", debug=debug)
+    def __init__(self, database_name: str, debug: bool = False):
+        super().__init__(schema_name=database_name, debug=debug)
 
     def get_category_id_from_subcategory_id(self, subcategory_id: int) -> int:
         """
@@ -15,6 +15,7 @@ class FinanceDB(PostgresDB):
         """
         query = "select category_id from subcategories where id = %s"
         return self.select(query, (subcategory_id,))[0][0]
+
 
     def get_subcategory_and_category(self) -> pl.DataFrame:
         """

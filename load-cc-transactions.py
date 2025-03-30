@@ -169,13 +169,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--filepath", required=True, help="Path to the credit card data file"
     )
-
+    parser.add_argument(
+        "--database", required=True, help="Name of the database to use"
+    )
     # Parse arguments
     args = parser.parse_args()
 
     # Get file path and card type from arguments
     file_path = args.filepath
     card_type = args.type
+    database_name = args.database
 
     # Load data based on card type
     if card_type == "amex":
@@ -185,7 +188,7 @@ if __name__ == "__main__":
 
     # Check if the DataFrame has any rows before inserting
     if df.height > 0:
-        finance_db = FinanceDB(debug=True)
+        finance_db = FinanceDB(database_name=database_name, debug=True)
         insert_df_to_postgres(df=df, finance_db=finance_db)
     else:
         print(f"No data to process in the {card_type} file")
