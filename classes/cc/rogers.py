@@ -5,7 +5,7 @@ class RogersStatement(CreditCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="rogers", file_path=file_path)
 
-    def load_data(self) -> pl.DataFrame:
+    def load_data(self) -> None:
         """
         Load and process Rogers credit card transaction data from a CSV file.
 
@@ -24,7 +24,7 @@ class RogersStatement(CreditCardStatement):
         # Read the CSV file with headers
         df = pl.read_csv(source=self.file_path, has_header=True)
 
-        # Rename columns to standardized names
+        # Rename columns to normalized names
         df1 = df.rename({"Date": "date", "Merchant Name": "merchant", "Amount": "cost"})
 
         # Select only the columns we need
@@ -46,4 +46,3 @@ class RogersStatement(CreditCardStatement):
         df5 = df4.filter(pl.col("cost") > 0)
 
         self.df = df5
-        return self.df

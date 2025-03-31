@@ -5,7 +5,7 @@ class AmexStatement(CreditCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="amex", file_path=file_path)
 
-    def load_data(self) -> pl.DataFrame:
+    def load_data(self) -> None:
         """
         Load and process American Express transaction data from an Excel file.
 
@@ -41,7 +41,7 @@ class AmexStatement(CreditCardStatement):
             .drop("index", "column_3")
         )
 
-        # Rename columns to more descriptive names
+        # Rename columns to more normalized names
         df2 = df1.rename(
             {
                 "column_1": "date",
@@ -59,4 +59,4 @@ class AmexStatement(CreditCardStatement):
         # Filter out rows where cost is negative (we only want expenses)
         df5 = df4.filter(pl.col("cost") > 0)
 
-        return df5
+        self.df = df5

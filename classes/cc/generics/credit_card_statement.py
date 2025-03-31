@@ -19,7 +19,7 @@ class CreditCardStatement(ABC):
         return True
 
     @abstractmethod
-    def load_data(self) -> pl.DataFrame:
+    def load_data(self) -> None:
         pass
 
     def get_df(self) -> pl.DataFrame:
