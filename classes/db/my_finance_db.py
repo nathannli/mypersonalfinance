@@ -1,13 +1,11 @@
 from datetime import date
-from classes.database import PostgresDB
 import polars as pl
+from classes.db.generics.finance_db import FinanceDB
 
-class FinanceDB(PostgresDB):
-    pl.Config.set_fmt_str_lengths(900)
-    pl.Config.set_tbl_width_chars(900)
+class MyFinanceDB(FinanceDB):
 
-    def __init__(self, database_name: str, debug: bool = False):
-        super().__init__(schema_name=database_name, debug=debug)
+    def __init__(self, debug: bool = False):
+        super().__init__(database_name="finance", debug=debug)
 
     def get_category_id_from_subcategory_id(self, subcategory_id: int) -> int:
         """
@@ -25,10 +23,7 @@ class FinanceDB(PostgresDB):
         return pl.DataFrame(self.select(query))
 
     def insert_expense(self, date: date, merchant: str, cost: float) -> None:
-        """
-        Insert an expense into the database.
-        Ask the user to select a category and subcategory for the expense.
-        """
+
         print(f"Transaction on {date} at {merchant} for {cost}")
         df = self.get_subcategory_and_category()
         print(df)
@@ -36,13 +31,3 @@ class FinanceDB(PostgresDB):
         category_id = self.get_category_id_from_subcategory_id(subcategory_id)
         query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
         self.insert(query, (date, merchant, cost, category_id, subcategory_id))
-
-    def check_if_expense_exists(self, date: date, merchant: str, cost: float) -> bool:
-        """
-        Check if an expense exists in the database.
-        True if it exists, False otherwise.
-        """
-        query = "select id from expenses where date = %s and merchant = %s and cost = %s"
-        result = self.select(query, (date, merchant, cost))
-        print(f"{result=}")
-        return len(result) > 0
