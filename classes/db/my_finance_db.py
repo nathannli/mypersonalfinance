@@ -19,8 +19,13 @@ class MyFinanceDB(FinanceDB):
         """
         Get all subcategories and categories.
         """
-        query = "select id, name as subcategory, categories.name as category from subcategories join categories on subcategories.category_id = categories.id"
-        return pl.DataFrame(self.select(query))
+        query = "select subcategories.id as subcategory_id, subcategories.name as subcategory, categories.name as category from subcategories join categories on subcategories.category_id = categories.id"
+        schema = {
+            "subcategory_id": pl.Int64,
+            "subcategory": pl.Utf8,
+            "category": pl.Utf8
+        }
+        return pl.DataFrame(self.select(query), schema=schema)
 
     def insert_expense(self, date: date, merchant: str, cost: float) -> None:
 
