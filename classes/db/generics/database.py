@@ -11,6 +11,8 @@ class PostgresDB(ABC):
     """
     pl.Config.set_fmt_str_lengths(900)
     pl.Config.set_tbl_width_chars(900)
+    pl.Config.set_tbl_rows(900)
+
     database_name: str
     debug: bool
 
