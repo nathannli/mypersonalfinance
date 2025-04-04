@@ -11,7 +11,8 @@ class CreditCardStatement(ABC):
     def __init__(self, type: str, file_path: str):
         self.type = type
         self.file_path = file_path
-        self.check_file_exists()
+        if self.check_file_exists():
+            self.load_data()
 
     def check_file_exists(self) -> bool:
         if not os.path.exists(self.file_path):
