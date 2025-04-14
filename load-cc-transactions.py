@@ -36,11 +36,11 @@ def insert_df_to_postgres(df: pl.DataFrame, finance_db: FinanceDB) -> int:
         date = row["date"]
         merchant = row["merchant"]
         cost = row["cost"]
-
+        cc_category = row["cc_category"]
         # Check if transaction already exists in expenses table
         if not finance_db.check_if_expense_exists(date, merchant, cost):
             print("New transaction found")
-            finance_db.insert_expense(date, merchant, cost)
+            finance_db.insert_expense(date, merchant, cost, cc_category)
             new_inserted_rows += 1
 
     print("\n\n")
