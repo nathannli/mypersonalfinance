@@ -43,6 +43,7 @@ def insert_df_to_postgres(df: pl.DataFrame, finance_db: FinanceDB) -> int:
             finance_db.insert_expense(date, merchant, cost)
             new_inserted_rows += 1
 
+    print("\n\n")
     print(
         f"Successfully inserted {new_inserted_rows}/{df.height} rows into finance.expenses"
     )
@@ -66,7 +67,7 @@ if __name__ == "__main__":
         "--filepath", required=True, help="Path to the credit card data file"
     )
     parser.add_argument(
-        "--database", required=True, help="Name of the database to use"
+        "--database", required=True, help="Name of the database to use (finance or parents_finance)"
     )
     args = parser.parse_args()
 
@@ -81,11 +82,17 @@ if __name__ == "__main__":
         df = AmexStatement(file_path=file_path).get_df()
     elif card_type == "rogers":
         df = RogersStatement(file_path=file_path).get_df()
+    else:
+        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers'.")
+        exit()
 
     if database_name == "finance":
         finance_db = MyFinanceDB(debug=True)
     elif database_name == "parents_finance":
         finance_db = ParentsFinanceDB(debug=True)
+    else:
+        print(f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'.")
+        exit()
 
     # Check if the DataFrame has any rows before inserting
     if df.height > 0:
@@ -94,4 +101,5 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("Keyboard interrupt")
             exit()
+        print("\n\n")
         print(f"No data to process in the {card_type} file")
