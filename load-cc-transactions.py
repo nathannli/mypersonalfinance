@@ -8,7 +8,7 @@ from classes.cc.rogers import RogersStatement
 from sys import exit
 
 
-def insert_df_to_postgres(df: pl.DataFrame, finance_db: FinanceDB) -> int:
+def insert_df_to_postgres(df: pl.DataFrame, finance_db: FinanceDB, card_type: str) -> int:
     """
     Insert the processed credit card data into a PostgreSQL database using Polars.
 
@@ -39,8 +39,9 @@ def insert_df_to_postgres(df: pl.DataFrame, finance_db: FinanceDB) -> int:
         cc_category = row["cc_category"]
         # Check if transaction already exists in expenses table
         if not finance_db.check_if_expense_exists(date, merchant, cost):
+            print("\n\n")
             print("New transaction found")
-            finance_db.insert_expense(date, merchant, cost, cc_category)
+            finance_db.insert_expense(date, merchant, cost, card_type, cc_category)
             new_inserted_rows += 1
 
     print("\n\n")
@@ -97,7 +98,7 @@ if __name__ == "__main__":
     # Check if the DataFrame has any rows before inserting
     if df.height > 0:
         try:
-            insert_df_to_postgres(df=df, finance_db=finance_db)
+            insert_df_to_postgres(df=df, finance_db=finance_db, card_type=card_type)
         except KeyboardInterrupt:
             print("Keyboard interrupt")
             exit()
