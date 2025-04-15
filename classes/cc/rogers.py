@@ -1,5 +1,5 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
-from classes.cc.cc_merchant_category_ref import rogers_cc_merchant_category_ref
+from classes.cc.cc_merchant_category_ref import rogers_cc_merchant_category_ref, manual_cc_merchant_category_ref
 import polars as pl
 
 class RogersStatement(CreditCardStatement):
@@ -51,4 +51,4 @@ class RogersStatement(CreditCardStatement):
 
     @staticmethod
     def auto_match_category(cc_category: str) -> tuple[str, str] | None:
-        return rogers_cc_merchant_category_ref.get(cc_category, None)
+        return (manual_cc_merchant_category_ref.get(cc_category) or rogers_cc_merchant_category_ref.get(cc_category)) or None
