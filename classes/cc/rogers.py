@@ -25,7 +25,7 @@ class RogersStatement(CreditCardStatement):
         df = pl.read_csv(source=self.file_path, has_header=True)
 
         # Rename columns to normalized names
-        df1 = df.rename({"Transaction Date": "date", "Merchant Name": "merchant", "Amount": "cost", "Merchant Category": "cc_category"})
+        df1 = df.rename({"Date": "date", "Merchant Name": "merchant", "Amount": "cost", "Merchant Category": "cc_category"})
 
         # Select only the columns we need
         df2 = df1.select(
