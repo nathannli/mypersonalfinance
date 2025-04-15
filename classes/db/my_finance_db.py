@@ -1,7 +1,9 @@
 from datetime import date
 import polars as pl
 from classes.db.generics.finance_db import FinanceDB
-from classes.cc.cc_merchant_category_ref import manual_cc_merchant_category_ref, rogers_cc_merchant_category_ref
+from classes.cc.rogers import RogersStatement
+from classes.cc.amex import AmexStatement
+
 class MyFinanceDB(FinanceDB):
 
     def __init__(self, debug: bool = False):
@@ -32,22 +34,26 @@ class MyFinanceDB(FinanceDB):
             "subcategory": pl.Utf8,
             "category": pl.Utf8
         }
-        return pl.DataFrame(self.select(query), schema=schema)
+        return pl.DataFrame(self.select(query), schema=schema, orient="row")
 
-    def insert_expense(self, date: date, merchant: str, cost: float, cc_category: str | None = None) -> None:
-        print("\n\n")
+    def insert_expense(self, date: date, merchant: str, cost: float, card_type: str, cc_category: str | None = None) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
-        if cc_category is not None:
-            print(f"CC Category: {cc_category}")
-            ref_category_tuple = (manual_cc_merchant_category_ref.get(cc_category) or rogers_cc_merchant_category_ref.get(cc_category))
-            if ref_category_tuple is not None:
-                category, subcategory = ref_category_tuple
-                print(f"Ref Category: {category}, Ref Subcategory: {subcategory}")
-                subcategory_id = self.get_subcategory_id_from_name(subcategory)
-                category_id = self.get_category_id_from_subcategory_id(subcategory_id)
-                query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
-                self.insert(query, (date, merchant, cost, category_id, subcategory_id))
-                return
+        # try auto match
+        if card_type == "rogers" and cc_category is not None:
+            ref_category_tuple = RogersStatement.auto_match_category(cc_category)
+        elif card_type == "amex":
+            ref_category_tuple = AmexStatement.auto_match_category(merchant)
+        else:
+            raise ValueError(f"Invalid card type: {card_type}")
+        if ref_category_tuple is not None:
+            category, subcategory = ref_category_tuple
+            print(f"Ref Category: {category}, Ref Subcategory: {subcategory}")
+            subcategory_id = self.get_subcategory_id_from_name(subcategory)
+            category_id = self.get_category_id_from_subcategory_id(subcategory_id)
+            query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
+            self.insert(query, (date, merchant, cost, category_id, subcategory_id))
+            return
+        # else user input
         df = self.get_subcategory_and_category()
         print("\n\n")
         print(df)
