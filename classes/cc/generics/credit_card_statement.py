@@ -23,5 +23,10 @@ class CreditCardStatement(ABC):
     def load_data(self) -> None:
         pass
 
+    @staticmethod
+    @abstractmethod
+    def auto_match_category() -> tuple[str, str]:
+        pass
+
     def get_df(self) -> pl.DataFrame:
         return self.df

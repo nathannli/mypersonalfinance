@@ -1,4 +1,5 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
+from classes.cc.cc_merchant_category_ref import rogers_cc_merchant_category_ref
 import polars as pl
 
 class RogersStatement(CreditCardStatement):
@@ -47,3 +48,7 @@ class RogersStatement(CreditCardStatement):
         df5 = df4.filter(pl.col("cost") > 0)
 
         self.df = df5
+
+    @staticmethod
+    def auto_match_category(cc_category: str) -> tuple[str, str] | None:
+        return rogers_cc_merchant_category_ref.get(cc_category, None)
