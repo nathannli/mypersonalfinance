@@ -15,14 +15,15 @@ class PostgresDB(ABC):
 
     database_name: str
     debug: bool
+    uri: str
 
     def __init__(self, database_name: str, debug: bool = False):
         """
         Initialize the PostgresDB instance.
         """
         load_dotenv()
-        self.uri = os.getenv("POSTGRES_CONNECTION_STRING")
         self.database_name = database_name
+        self.uri = f"{os.getenv("POSTGRES_CONNECTION_STRING")}/{self.database_name}"
         self.debug = debug
         if self.debug:
             print(f"{self.uri=}")
@@ -52,7 +53,7 @@ class PostgresDB(ABC):
                 cur.execute(query, args)
                 conn.commit()
 
-    def select(self, query: str, args: tuple = None) -> list[tuple]:
+    def select(self, query: str, args: tuple | None = None) -> list[tuple]:
         """
         Select data from the database.
         """
