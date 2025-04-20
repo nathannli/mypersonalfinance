@@ -25,7 +25,8 @@ def run(file_path: str):
         pl.col("DATE"),
         pl.col("DETAILSDescriptions"),
         pl.col("DR_PAYMENTs"),
-        pl.col("ACCT_CODE")
+        pl.col("ACCT_subCODE"),
+        pl.col("ACCT_CODE"),
     )
 
     # rename the columns
@@ -33,6 +34,7 @@ def run(file_path: str):
         "DATE": "date",
         "DETAILSDescriptions": "merchant",
         "DR_PAYMENTs": "cost",
+        "ACCT_subCODE": "cc_sub_category",
         "ACCT_CODE": "cc_category"
     })
 
@@ -50,6 +52,15 @@ def run(file_path: str):
         merchant = row["merchant"]
         cost = row["cost"]
         cc_category = row["cc_category"]
+        cc_sub_category = row["cc_sub_category"]
+        # special handling for cc_sub_category is Tfr=*
+        if "Tfr=" in cc_sub_category:
+            # check if transaction already exists in expenses table
+            if parents_db.check_if_expense_exists(date, merchant, cost):
+                # if yes, delete from expenses table
+                expense_id = parents_db.get_expense_id(date, merchant, cost)
+                parents_db.delete_expense(expense_id)
+            continue
         # Check if transaction already exists in expenses table
         if not parents_db.check_if_expense_exists(date, merchant, cost):
             print("\n\n")
