@@ -21,7 +21,12 @@ class PostgresDB(ABC):
         """
         Initialize the PostgresDB instance.
         """
-        load_dotenv()
+        # Get the current working directory and find .env file
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(current_dir, "../../.."))
+        dotenv_path = os.path.join(project_root, ".env")
+        print(f"{dotenv_path=}")
+        load_dotenv(dotenv_path=dotenv_path)
         self.database_name = database_name
         self.uri = f"{os.getenv("POSTGRES_CONNECTION_STRING")}/{self.database_name}"
         self.debug = debug
