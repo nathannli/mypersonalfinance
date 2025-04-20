@@ -95,10 +95,16 @@ class ParentsFinanceDB(FinanceDB):
         """
         query = "select merchant_name, merchant_category from auto_match"
         result_dict = {row[0]: row[1] for row in self.select(query)}
+        match_results = list()
         for k,v in result_dict.items():
             if k in merchant_name.lower():
-                return v
-        return None
+                match_results.append(v)
+        if len(match_results) > 1:
+            raise ValueError(f"Multiple categories found for {merchant_name}. Something is wrong.")
+        elif len(match_results) == 1:
+            return match_results[0]
+        else:
+            return None
 
     def insert_into_auto_match(self, merchant_name: str, merchant_category: str) -> None:
         """
