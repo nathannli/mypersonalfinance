@@ -2,6 +2,7 @@
 finance_postgres_sql_statements.sql
 classes/__pycache__
 bin/
+data-files/
 
 *.pyc
 *.pyo
