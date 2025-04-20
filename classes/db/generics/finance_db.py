@@ -23,3 +23,19 @@ class FinanceDB(PostgresDB):
         query = "select id from expenses where date = %s and merchant = %s and cost = %s"
         result = self.select(query, (date, merchant, cost))
         return len(result) > 0
+    
+    def get_expense_id(self, date: date, merchant: str, cost: float) -> int:
+        """
+        Get the id of an expense in the database.
+        """
+        query = "select id from expenses where date = %s and merchant = %s and cost = %s"
+        result = self.select(query, (date, merchant, cost))
+        return result[0][0]
+    
+    def delete_expense(self, expense_id: int) -> None:
+        """
+        Delete an expense from the database.
+        """
+        query = "delete from expenses where id = %s"
+        self.insert(query, (expense_id,))
+
