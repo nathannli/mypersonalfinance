@@ -1,0 +1,2 @@
+# rename this file to .env
+POSTGRES_CONNECTION_STRING=postgresql://username:password@host_name_or_ip:postgres_port_number
