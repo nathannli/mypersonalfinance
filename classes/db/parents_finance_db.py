@@ -70,10 +70,11 @@ class ParentsFinanceDB(FinanceDB):
                         print(f"Category ID {category_id} not found. Please enter a valid category ID.")
                 except ValueError:
                     print("Please enter a valid integer for category ID.")
-
-        # insert the expense
-        query = "insert into expenses (date, merchant, cost, category_id) values (%s, %s, %s, %s)"
-        self.insert(query, (date, merchant, cost, category_id))
+        # if category ignore is selected, then do not insert row in database
+        if not category_id == 22:
+            # insert the expense
+            query = "insert into expenses (date, merchant, cost, category_id) values (%s, %s, %s, %s)"
+            self.insert(query, (date, merchant, cost, category_id))
 
         # ask the user if they want to add the merchant to the auto_match table
         if not found_match:
