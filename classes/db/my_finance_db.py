@@ -53,8 +53,6 @@ class MyFinanceDB(FinanceDB):
     def insert_expense(self, date: date, merchant: str, cost: float, card_type: str, cc_category: str | None = None) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
         # try auto match
-        category = None
-        subcategory = None
         found_match = False
         if card_type == "rogers" and cc_category is not None:
             # only rogers cc uses cc_category
