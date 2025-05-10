@@ -1,5 +1,4 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
-from classes.cc.cc_merchant_category_ref import amex_cc_merchant_name_to_category_ref
 import polars as pl
 
 class AmexStatement(CreditCardStatement):
@@ -53,8 +52,23 @@ class AmexStatement(CreditCardStatement):
         # Add a dummy cc_category column with None values
         df3 = df2.with_columns(pl.lit(None).alias("cc_category"))
 
-        # Convert date strings to date objects
-        df4 = df3.with_columns(pl.col("date").str.to_date(format="%d %b. %Y"))
+        # Convert date strings to date objects with handling for both formats
+        # For months with 3 letters or less (e.g., "May"), use "%d %b %Y"
+        # For months with more than 3 letters (e.g., "Apr."), use "%d %b. %Y"
+        # Filter dates with period (e.g., "Apr.") and convert them
+        df_with_period = df3.filter(pl.col("date").str.contains(r"\. "))
+        df_with_period = df_with_period.with_columns(
+            pl.col("date").str.to_date(format="%d %b. %Y")
+        )
+
+        # Filter dates without period (e.g., "May") and convert them
+        df_without_period = df3.filter(~pl.col("date").str.contains(r"\. "))
+        df_without_period = df_without_period.with_columns(
+            pl.col("date").str.to_date(format="%d %b %Y")
+        )
+
+        # Union the two dataframes
+        df4 = pl.concat([df_with_period, df_without_period])
 
         # Convert amount strings to decimal numbers, removing dollar signs
         df5 = df4.with_columns(pl.col("cost").str.replace(r"\$", "").str.to_decimal())
@@ -63,10 +77,3 @@ class AmexStatement(CreditCardStatement):
         df6 = df5.filter(pl.col("cost") > 0)
 
         self.df = df6
-
-    @staticmethod
-    def auto_match_category(merchant: str) -> tuple[str, str] | None:
-        for k, v in amex_cc_merchant_name_to_category_ref.items():
-            if k in merchant:
-                return v
-        return None
