@@ -39,26 +39,60 @@ class MyFinanceDB(FinanceDB):
     def insert_expense(self, date: date, merchant: str, cost: float, card_type: str, cc_category: str | None = None) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
         # try auto match
+        found_match = False
         if card_type == "rogers" and cc_category is not None:
+            # only rogers cc uses cc_category
             ref_category_tuple = RogersStatement.auto_match_category(cc_category)
-        elif card_type == "amex":
-            ref_category_tuple = AmexStatement.auto_match_category(merchant)
         else:
-            raise ValueError(f"Invalid card type: {card_type}")
+            # use merchant name to auto match
+            ref_category_tuple = self.get_auto_match_category(merchant)
+        # if auto match found get category id and subcategory id
         if ref_category_tuple is not None:
+            found_match = True
             category, subcategory = ref_category_tuple
             print(f"Ref Category: {category}, Ref Subcategory: {subcategory}")
             subcategory_id = self.get_subcategory_id_from_name(subcategory)
             category_id = self.get_category_id_from_subcategory_id(subcategory_id)
-            query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
-            self.insert(query, (date, merchant, cost, category_id, subcategory_id))
-            return
         # else user input
-        df = self.get_subcategory_and_category()
-        print("\n\n")
-        print(df)
-        print("\n\n")
-        subcategory_id = input("Enter the subcategory id: ")
-        category_id = self.get_category_id_from_subcategory_id(subcategory_id)
+        if not found_match:
+            df = self.get_subcategory_and_category()
+            print("\n\n")
+            print(df)
+            print("\n\n")
+            subcategory_id = input("Enter the subcategory id: ")
+            category_id = self.get_category_id_from_subcategory_id(subcategory_id)
+        # insert the expense
         query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
         self.insert(query, (date, merchant, cost, category_id, subcategory_id))
+        # ask the user if they want to add the merchant to the auto_match table
+        if not found_match:
+            while True:
+                add_to_auto_match = input("Add to auto_match table? (y/n): ")
+                if add_to_auto_match == "y":
+                    self.insert_into_auto_match(merchant, category, subcategory)
+                    break
+                elif add_to_auto_match == "n":
+                    break
+                else:
+                    print("Please enter a valid response (y/n).")
+
+    def get_auto_match_category(self, merchant: str) -> tuple[str, str] | None:
+        """
+        Get the category and subcategory for the merchant.
+        """
+        query = "select merchant_category, merchant_subcategory from merchant_name_auto_match where lower(merchant_name) like %s"
+        wildcard_merchant = f"%{merchant.lower()}%"
+        result = self.select(query, (wildcard_merchant,))
+        if len(result) > 1:
+            raise ValueError(f"Multiple categories found for {merchant}. Something is wrong.")
+        elif len(result) == 1:
+            return result[0]
+        else:
+            return None
+
+    def insert_into_auto_match(self, merchant: str, category: str, subcategory: str) -> None:
+        """
+        Insert a new merchant into the auto_match table.
+        """
+        query = "insert into merchant_name_auto_match (merchant_name, merchant_category, merchant_subcategory) values (%s, %s, %s)"
+        self.insert(query, (merchant.lower(), category, subcategory))
