@@ -2,7 +2,7 @@ from datetime import date
 import polars as pl
 from classes.db.generics.finance_db import FinanceDB
 from classes.cc.rogers import RogersStatement
-from classes.cc.amex import AmexStatement
+from classes.cc.ref_data import reimbursement_merchant_ref
 
 class MyFinanceDB(FinanceDB):
     reimbursement_subcategory_id = 14
@@ -51,6 +51,8 @@ class MyFinanceDB(FinanceDB):
 
     def insert_expense(self, date: date, merchant: str, cost: float, card_type: str, cc_category: str | None = None) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
+        category = None
+        subcategory = None
         # try auto match
         found_match = False
         if card_type == "rogers" and cc_category is not None:
@@ -75,7 +77,7 @@ class MyFinanceDB(FinanceDB):
             subcategory_id = input("Enter the subcategory id: ")
             category_id = self.get_category_id_from_subcategory_id(subcategory_id)
         # if subcategory is reimbursement or if in reimbursement_merchant_ref, need to double check if record already exists (date, merchant only)
-        if any(merchant.lower() in reimbursement_merchant.lower() for reimbursement_merchant in self.reimbursement_merchant_ref) or subcategory_id == self.reimbursement_subcategory_id:
+        if any(merchant.lower() in reimbursement_merchant.lower() for reimbursement_merchant in reimbursement_merchant_ref) or subcategory_id == self.reimbursement_subcategory_id:
             if self.check_if_reimbursement_expense_exists(date, merchant):
                 print(f"Record already exists for {date} at {merchant}. Skipping...")
                 return
