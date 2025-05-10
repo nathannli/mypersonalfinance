@@ -5,6 +5,7 @@ from classes.cc.rogers import RogersStatement
 from classes.cc.amex import AmexStatement
 
 class MyFinanceDB(FinanceDB):
+    reimbursement_subcategory_id = 14
 
     def __init__(self, debug: bool = False):
         super().__init__(database_name="finance", debug=debug)
@@ -42,6 +43,13 @@ class MyFinanceDB(FinanceDB):
         }
         return pl.DataFrame(self.select(query), schema=schema, orient="row")
 
+    def check_if_reimbursement_expense_exists(self, date: date, merchant: str) -> bool:
+        """
+        Check if a reimbursement expense exists in the database.
+        """
+        query = "select id from expenses where date = %s and merchant = %s"
+        exists_in_db = len(self.select(query, (date, merchant))) > 0
+
     def insert_expense(self, date: date, merchant: str, cost: float, card_type: str, cc_category: str | None = None) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
         # try auto match
@@ -69,6 +77,11 @@ class MyFinanceDB(FinanceDB):
             print("\n\n")
             subcategory_id = input("Enter the subcategory id: ")
             category_id = self.get_category_id_from_subcategory_id(subcategory_id)
+        # if subcategory is reimbursement or if in reimbursement_merchant_ref, need to double check if record already exists (date, merchant only)
+        if any(merchant.lower() in reimbursement_merchant.lower() for reimbursement_merchant in self.reimbursement_merchant_ref) or subcategory_id == self.reimbursement_subcategory_id:
+            if self.check_if_reimbursement_expense_exists(date, merchant):
+                print(f"Record already exists for {date} at {merchant}. Skipping...")
+                return
         # insert the expense
         query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
         self.insert(query, (date, merchant, cost, category_id, subcategory_id))
