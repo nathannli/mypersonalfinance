@@ -48,7 +48,7 @@ class MyFinanceDB(FinanceDB):
         Check if a reimbursement expense exists in the database.
         """
         query = "select id from expenses where date = %s and merchant = %s"
-        exists_in_db = len(self.select(query, (date, merchant))) > 0
+        return len(self.select(query, (date, merchant))) > 0
 
     def insert_expense(self, date: date, merchant: str, cost: float, card_type: str, cc_category: str | None = None) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
