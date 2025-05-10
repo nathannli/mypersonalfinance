@@ -70,12 +70,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--database", required=True, help="Name of the database to use (finance or parents_finance)"
     )
+
+    # Parse arguments and check if any are missing
     args = parser.parse_args()
 
-    # Get file path and card type from arguments
-    file_path = args.filepath
-    card_type = args.type
-    database_name = args.database
+    # If any required args are missing, parser.parse_args() will exit automatically
+    # with the help message, but we'll handle any other issues
+    try:
+        # Get file path and card type from arguments
+        file_path = args.filepath
+        card_type = args.type
+        database_name = args.database
+    except Exception:
+        parser.print_help()
+        exit(1)
 
 
     # Load data based on card type
