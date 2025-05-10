@@ -70,8 +70,8 @@ class AmexStatement(CreditCardStatement):
         # Union the two dataframes
         df4 = pl.concat([df_with_period, df_without_period])
 
-        # Convert amount strings to decimal numbers, removing dollar signs
-        df5 = df4.with_columns(pl.col("cost").str.replace(r"\$", "").str.to_decimal())
+        # Convert amount strings to decimal numbers, removing dollar signs and commas
+        df5 = df4.with_columns(pl.col("cost").str.replace(r"\$", "").str.replace(",", "").str.to_decimal())
 
         # Filter out rows where cost is negative (we only want expenses)
         df6 = df5.filter(pl.col("cost") > 0)
