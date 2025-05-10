@@ -8,3 +8,7 @@ rogers_cc_merchant_category_ref: dict[str, tuple[str, str]] = {
     "Miscellaneous Food Stores-Convenience Stores and Specialty Markets": ("Food", "Grocery"),
     "Local and Suburban Commuter Passenger Transportation, including Ferries": ("Commuting", "Transit"),
 }
+
+reimbursement_merchant_ref: list[str] = [
+    "NEXUS MASSAGE AND REHAB TORONTO",
+]
