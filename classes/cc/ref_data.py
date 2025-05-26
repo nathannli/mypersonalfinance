@@ -12,3 +12,7 @@ rogers_cc_merchant_category_ref: dict[str, tuple[str, str]] = {
 reimbursement_merchant_ref: list[str] = [
     "NEXUS MASSAGE AND REHAB TORONTO",
 ]
+
+simplii_visa_cc_merchant_name_to_category_ref: dict[str, tuple[str, str]] = {
+    "Restaurants": ("Food", "Eating Out"),
+}
