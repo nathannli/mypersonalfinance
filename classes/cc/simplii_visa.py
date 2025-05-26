@@ -1,5 +1,5 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
-from classes.cc.cc_merchant_category_ref import simplii_visa_cc_merchant_name_to_category_ref
+from classes.cc.ref_data import simplii_visa_cc_merchant_name_to_category_ref
 import polars as pl
 
 class SimpliiVisaStatement(CreditCardStatement):
@@ -39,15 +39,13 @@ class SimpliiVisaStatement(CreditCardStatement):
         # Convert date strings to date objects
         df4 = df3.with_columns(pl.col("date").str.to_date(format="%m/%d/%Y"))
 
-        # Convert amount strings to decimal numbers
-        df5 = df4.with_columns(pl.col("cost").str.to_decimal())
-
         # Filter out rows where cost is null (we only want expenses)
-        df6 = df5.filter(pl.col("cost").is_not_null())
+        df6 = df4.filter(pl.col("cost").is_not_null())
 
         self.df = df6
 
-    def auto_match_category(self) -> tuple[str, str]:
+    @staticmethod
+    def auto_match_category() -> tuple[str, str]:
         """
         This is static because this card is only used for restaurants.
         """

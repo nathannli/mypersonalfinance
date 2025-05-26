@@ -1,4 +1,5 @@
 import polars as pl
+from classes.cc.simplii_visa import SimpliiVisaStatement
 from classes.db.generics.finance_db import FinanceDB
 from classes.db.my_finance_db import MyFinanceDB
 from classes.db.parents_finance_db import ParentsFinanceDB
@@ -91,8 +92,10 @@ if __name__ == "__main__":
         df = AmexStatement(file_path=file_path).get_df()
     elif card_type == "rogers":
         df = RogersStatement(file_path=file_path).get_df()
+    elif card_type == "simplii_visa":
+        df = SimpliiVisaStatement(file_path=file_path).get_df()
     else:
-        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers'.")
+        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa'.")
         exit()
 
     if database_name == "finance":
