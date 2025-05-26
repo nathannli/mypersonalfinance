@@ -1,5 +1,6 @@
 from datetime import date
 import polars as pl
+from classes.cc.simplii_visa import SimpliiVisaStatement
 from classes.db.generics.finance_db import FinanceDB
 from classes.cc.rogers import RogersStatement
 from classes.cc.ref_data import reimbursement_merchant_ref
@@ -58,6 +59,8 @@ class MyFinanceDB(FinanceDB):
         if card_type == "rogers" and cc_category is not None:
             # only rogers cc uses cc_category
             ref_category_tuple = RogersStatement.auto_match_category(cc_category)
+        elif card_type == "simplii_visa":
+            ref_category_tuple = SimpliiVisaStatement.auto_match_category()
         else:
             # use merchant name to auto match
             ref_category_tuple = self.get_auto_match_category(merchant)

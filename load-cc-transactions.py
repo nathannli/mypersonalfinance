@@ -60,9 +60,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--type",
-        choices=["amex", "rogers"],
+        choices=["amex", "rogers", "simplii_visa"],
         required=True,
-        help="Type of credit card data to process (amex or rogers)",
+        help="Type of credit card data to process (amex or rogers or simplii_visa)",
     )
     parser.add_argument(
         "--filepath", required=True, help="Path to the credit card data file"
