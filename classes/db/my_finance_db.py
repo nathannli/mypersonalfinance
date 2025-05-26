@@ -92,11 +92,10 @@ class MyFinanceDB(FinanceDB):
             while True:
                 add_to_auto_match = input("Add to auto_match table? (y/n): ")
                 if add_to_auto_match == "y":
-                    merchant_name_substring = input("Enter the merchant name substring (lowercase): ")
                     # check if category and subcategory are not None, if they are None, get the names from the database
                     if category is None or subcategory is None:
                         category, subcategory = self.get_category_and_subcategory_name_from_subcategory_id(subcategory_id)
-                    self.insert_into_auto_match(merchant_name_substring, category, subcategory)
+                    self.insert_into_auto_match(merchant, category, subcategory)
                     break
                 elif add_to_auto_match == "n":
                     break
@@ -107,21 +106,30 @@ class MyFinanceDB(FinanceDB):
         """
         Get the category and subcategory for the merchant.
         """
-        query = "select merchant_name, merchant_category, merchant_subcategory from merchant_name_auto_match"
-        result_dict = {row[0]: (row[1], row[2]) for row in self.select(query)}
-
-        matches = [v for k, v in result_dict.items() if k in merchant.lower()]
-
-        if len(matches) > 1:
+        query = "select merchant_category, merchant_subcategory from merchant_name_auto_match where merchant_name = %s"
+        result = self.select(query, (merchant,))
+        if len(result) > 1:
             raise ValueError(f"Multiple categories found for {merchant}. Something is wrong.")
-        elif len(matches) == 1:
-            return matches[0]
+        elif len(result) == 1:
+            return result[0]
         else:
-            return None
+            # try substring auto match
+            query = "select substring, merchant_category, merchant_subcategory from substring_auto_match"
+            result = self.select(query)
+            substring_matches = list()
+            for k,v in result.items():
+                if k in merchant.lower():
+                    substring_matches.append(v)
+            if len(substring_matches) > 1:
+                raise ValueError(f"Multiple categories found for {merchant}. Something is wrong.")
+            elif len(substring_matches) == 1:
+                return substring_matches[0]
+            else:
+                return None
 
-    def insert_into_auto_match(self, merchant_name_substring: str, category: str, subcategory: str) -> None:
+    def insert_into_auto_match(self, merchant: str, category: str, subcategory: str) -> None:
         """
         Insert a new merchant into the auto_match table.
         """
         query = "insert into merchant_name_auto_match (merchant_name, merchant_category, merchant_subcategory) values (%s, %s, %s)"
-        self.insert(query, (merchant_name_substring.lower(), category, subcategory))
+        self.insert(query, (merchant, category, subcategory))
