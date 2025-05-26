@@ -81,9 +81,7 @@ class ParentsFinanceDB(FinanceDB):
             while True:
                 add_to_auto_match = input("Add to auto_match table? (y/n): ")
                 if add_to_auto_match == "y":
-                    # get merchant name substring from user input
-                    merchant_name_substring = input("Enter the merchant name substring (will be lowercased automatically): ")
-                    self.insert_into_auto_match(merchant_name_substring, self.get_category_name_from_id(category_id))
+                    self.insert_into_auto_match(merchant, self.get_category_name_from_id(category_id))
                     break
                 elif add_to_auto_match == "n":
                     break
@@ -94,16 +92,12 @@ class ParentsFinanceDB(FinanceDB):
         """
         Get the category for the merchant.
         """
-        query = "select merchant_name, merchant_category from auto_match"
-        result_dict = {row[0]: row[1] for row in self.select(query)}
-        match_results = list()
-        for k,v in result_dict.items():
-            if k in merchant_name.lower():
-                match_results.append(v)
-        if len(match_results) > 1:
+        query = "select merchant_category from auto_match where merchant_name = %s"
+        result = self.select(query, (merchant_name,))
+        if len(result) > 1:
             raise ValueError(f"Multiple categories found for {merchant_name}. Something is wrong.")
-        elif len(match_results) == 1:
-            return match_results[0]
+        elif len(result) == 1:
+            return result[0][0]
         else:
             return None
 
@@ -112,4 +106,4 @@ class ParentsFinanceDB(FinanceDB):
         Insert a new merchant into the auto_match table.
         """
         query = "insert into auto_match (merchant_name, merchant_category) values (%s, %s)"
-        self.insert(query, (merchant_name.lower(), merchant_category))
+        self.insert(query, (merchant_name, merchant_category))
