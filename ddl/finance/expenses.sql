@@ -10,3 +10,5 @@ CREATE TABLE expenses (
     CONSTRAINT expenses_category_id_fkey FOREIGN KEY (category_id) REFERENCES categories (id),
     CONSTRAINT expenses_subcategory_id_fkey FOREIGN KEY (subcategory_id) REFERENCES subcategories (id)
 );
+
+ALTER TABLE expenses ADD COLUMN comments TEXT;

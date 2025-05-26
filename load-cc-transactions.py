@@ -1,4 +1,5 @@
 import polars as pl
+from classes.cc.bmo import BMOStatement
 from classes.cc.simplii_visa import SimpliiVisaStatement
 from classes.db.generics.finance_db import FinanceDB
 from classes.db.my_finance_db import MyFinanceDB
@@ -61,9 +62,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--type",
-        choices=["amex", "rogers", "simplii_visa"],
+        choices=["amex", "rogers", "simplii_visa", "bmo"],
         required=True,
-        help="Type of credit card data to process (amex or rogers or simplii_visa)",
+        help="Type of credit card data to process (amex or rogers or simplii_visa or bmo)",
     )
     parser.add_argument(
         "--filepath", required=True, help="Path to the credit card data file"
@@ -94,8 +95,10 @@ if __name__ == "__main__":
         df = RogersStatement(file_path=file_path).get_df()
     elif card_type == "simplii_visa":
         df = SimpliiVisaStatement(file_path=file_path).get_df()
+    elif card_type == "bmo":
+        df = BMOStatement(file_path=file_path).get_df()
     else:
-        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa'.")
+        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo'.")
         exit()
 
     if database_name == "finance":
