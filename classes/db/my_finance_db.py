@@ -92,7 +92,7 @@ class MyFinanceDB(FinanceDB):
             while True:
                 add_to_auto_match = input("Add to auto_match table? (y/n): ")
                 if add_to_auto_match == "y":
-                    merchant_name_substring = input("Enter the merchant name substring (lowercase): ")
+                    merchant_name_substring = input("Enter the merchant name substring (will be lowercased automatically): ")
                     # check if category and subcategory are not None, if they are None, get the names from the database
                     if category is None or subcategory is None:
                         category, subcategory = self.get_category_and_subcategory_name_from_subcategory_id(subcategory_id)

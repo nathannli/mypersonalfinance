@@ -82,7 +82,7 @@ class ParentsFinanceDB(FinanceDB):
                 add_to_auto_match = input("Add to auto_match table? (y/n): ")
                 if add_to_auto_match == "y":
                     # get merchant name substring from user input
-                    merchant_name_substring = input("Enter the merchant name substring (lowercase): ")
+                    merchant_name_substring = input("Enter the merchant name substring (will be lowercased automatically): ")
                     self.insert_into_auto_match(merchant_name_substring, self.get_category_name_from_id(category_id))
                     break
                 elif add_to_auto_match == "n":
