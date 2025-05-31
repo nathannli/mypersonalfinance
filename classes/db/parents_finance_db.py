@@ -99,7 +99,19 @@ class ParentsFinanceDB(FinanceDB):
         elif len(result) == 1:
             return result[0][0]
         else:
-            return None
+            # try substring auto match
+            query = "select substring, merchant_category from substring_auto_match"
+            result = self.select(query)
+            substring_matches = list()
+            for item in result:
+                if item[0] in merchant_name.lower():
+                    substring_matches.append(item[1])
+            if len(substring_matches) > 1:
+                raise ValueError(f"Multiple categories found for {merchant_name}. Something is wrong.")
+            elif len(substring_matches) == 1:
+                return substring_matches[0]
+            else:
+                return None
 
     def insert_into_auto_match(self, merchant_name: str, merchant_category: str) -> None:
         """
