@@ -117,9 +117,9 @@ class MyFinanceDB(FinanceDB):
             query = "select substring, merchant_category, merchant_subcategory from substring_auto_match"
             result = self.select(query)
             substring_matches = list()
-            for k,v in result.items():
-                if k in merchant.lower():
-                    substring_matches.append(v)
+            for item in result:
+                if item[0] in merchant.lower():
+                    substring_matches.append(item[1])
             if len(substring_matches) > 1:
                 raise ValueError(f"Multiple categories found for {merchant}. Something is wrong.")
             elif len(substring_matches) == 1:
