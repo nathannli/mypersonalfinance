@@ -49,5 +49,7 @@ class WealthsimpleStatement(CreditCardStatement):
         # remove rows where merchant equals to "Transfer out"
         df9 = df8.filter(pl.col("merchant") != "Transfer out")
 
-        self.df = df9
+        # turn cost into positive
+        df10 = df9.with_columns(pl.col("cost").abs().alias("cost"))
 
+        self.df = df10
