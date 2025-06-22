@@ -5,6 +5,12 @@ from classes.db.parents_finance_db import ParentsFinanceDB
 DEBUG = True
 
 def run(file_path: str):
+
+    # chequing file check
+    chequing_file = False
+    if "tdcheq" in file_path.lower():
+        chequing_file = True
+
     # Define schema for the Excel file
     schema = {
         "BANK": pl.Utf8,
@@ -60,6 +66,9 @@ def run(file_path: str):
                 # if yes, delete from expenses table
                 expense_id = parents_db.get_expense_id(date, merchant, cost)
                 parents_db.delete_expense(expense_id)
+            continue
+        # if tdcheq and cc_sub_category is "Tfr-*", then skip
+        if chequing_file and "Tfr-" in cc_sub_category:
             continue
         # Check if transaction already exists in expenses table
         if not parents_db.check_if_expense_exists(date, merchant, cost):
