@@ -89,6 +89,9 @@ class MyFinanceDB(FinanceDB):
         self.insert(query, (date, merchant, cost, category_id, subcategory_id))
         # ask the user if they want to add the merchant to the auto_match table
         if not found_match:
+            # if merchant is "Interac e-Transfer® Out", skip
+            if merchant == "Interac e-Transfer® Out":
+                return
             while True:
                 add_to_auto_match = input("Add to auto_match table? (y/n): ")
                 if add_to_auto_match == "y":
