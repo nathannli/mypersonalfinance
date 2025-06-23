@@ -120,4 +120,5 @@ if __name__ == "__main__":
             print("Keyboard interrupt")
             exit()
         print("\n\n")
+    else:
         print(f"No data to process in the {card_type} file")
