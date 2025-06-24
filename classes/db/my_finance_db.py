@@ -57,8 +57,11 @@ class MyFinanceDB(FinanceDB):
         # try auto match
         found_match = False
         if card_type == "rogers" and cc_category is not None:
-            # only rogers cc uses cc_category
+            # only rogers cc uses cc_category, so try ref rogers automatch first
             ref_category_tuple = RogersStatement.auto_match_category(cc_category)
+            # then try get_auto_match_category
+            if ref_category_tuple is None:
+                ref_category_tuple = self.get_auto_match_category(merchant)
         elif card_type == "simplii_visa":
             ref_category_tuple = SimpliiVisaStatement.auto_match_category()
         else:
