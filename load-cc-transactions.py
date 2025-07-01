@@ -6,6 +6,7 @@ from classes.db.my_finance_db import MyFinanceDB
 from classes.db.parents_finance_db import ParentsFinanceDB
 from classes.cc.amex import AmexStatement
 from classes.cc.rogers import RogersStatement
+from classes.cc.wealthsimple import WealthsimpleStatement
 
 from sys import exit
 
@@ -62,12 +63,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--type",
-        choices=["amex", "rogers", "simplii_visa", "bmo"],
+        choices=["amex", "rogers", "simplii_visa", "bmo", "wealthsimple"],
         required=True,
-        help="Type of credit card data to process (amex or rogers or simplii_visa or bmo)",
+        help="Type of credit card data to process (amex or rogers or simplii_visa or bmo or wealthsimple)",
     )
     parser.add_argument(
-        "--filepath", required=True, help="Path to the credit card data file"
+        "--filepath", required=True, help="Path to the transaction data csv file"
     )
     parser.add_argument(
         "--database", required=True, help="Name of the database to use (finance or parents_finance)"
@@ -97,8 +98,10 @@ if __name__ == "__main__":
         df = SimpliiVisaStatement(file_path=file_path).get_df()
     elif card_type == "bmo":
         df = BMOStatement(file_path=file_path).get_df()
+    elif card_type == "wealthsimple":
+        df = WealthsimpleStatement(file_path=file_path).get_df()
     else:
-        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo'.")
+        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo' or 'wealthsimple'.")
         exit()
 
     if database_name == "finance":
@@ -117,4 +120,5 @@ if __name__ == "__main__":
             print("Keyboard interrupt")
             exit()
         print("\n\n")
+    else:
         print(f"No data to process in the {card_type} file")
