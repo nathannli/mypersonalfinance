@@ -3,9 +3,13 @@ from classes.db.generics.finance_db import FinanceDB
 import polars as pl
 
 class ParentsFinanceDB(FinanceDB):
+    
+    cron: bool
+    manual_intervention_required_expense_count: int = 0
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, cron: bool = False):
         super().__init__(database_name="parents_finance", debug=debug)
+        self.cron = cron
 
     def get_category(self) -> pl.DataFrame:
         """
@@ -57,6 +61,9 @@ class ParentsFinanceDB(FinanceDB):
                 found_match = True
 
         if category_id is None:
+            if self.cron:
+                self.manual_intervention_required_expense_count += 1
+                return
             # Ask user to select category
             df = self.get_category()
             print(df)

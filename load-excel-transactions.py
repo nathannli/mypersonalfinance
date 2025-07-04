@@ -1,10 +1,13 @@
 import argparse
+import json
 import polars as pl
+import requests
 from classes.db.parents_finance_db import ParentsFinanceDB
 
+DISCORD_ALERT_BOT_URL = "http://195.168.1.95:30007/alert"
 DEBUG = True
 
-def run(file_path: str):
+def run(file_path: str, cron: bool):
 
     # chequing file check
     chequing_file = False
@@ -48,7 +51,7 @@ def run(file_path: str):
     df3 = df2.filter(pl.col("cost") > 0)
 
     # load parents db
-    parents_db = ParentsFinanceDB(debug=DEBUG)
+    parents_db = ParentsFinanceDB(debug=DEBUG, cron=cron)
 
     # insert the expenses
     new_inserted_rows = 0
@@ -78,7 +81,19 @@ def run(file_path: str):
             new_inserted_rows += 1
 
     print("\n\n")
-    print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses")
+    if cron:
+        if parents_db.manual_intervention_required_expense_count > 0:
+            message = f"Manual intervention required for {parents_db.manual_intervention_required_expense_count} expenses"
+            send_discord_message(message)
+        send_discord_message(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses")
+    else:
+        print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses")
+    
+    
+def send_discord_message(message):
+    payload_dict = {"message": message}
+    requests.post(DISCORD_ALERT_BOT_URL, json=json.dumps(payload_dict))
+    
 
 
 if __name__ == "__main__":
@@ -89,11 +104,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--filepath", required=True, help="Path to the credit card excel file"
     )
+    parser.add_argument(
+        "--cron", required=False, help="boolean, any input will trigger true"
+    )
     args = parser.parse_args()
     file_path = args.filepath
+    cron = False if args.cron else True
 
     try:
-        run(file_path)
+        run(file_path, cron)
     except KeyboardInterrupt:
         print("Keyboard interrupt")
         exit()
