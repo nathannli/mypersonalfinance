@@ -82,12 +82,12 @@ def run(file_path: str, cron: bool):
 
     print("\n\n")
     if cron:
+        send_discord_message(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {file_path}")
         if parents_db.manual_intervention_required_expense_count > 0:
-            message = f"Manual intervention required for {parents_db.manual_intervention_required_expense_count} expenses"
+            message = f"Manual intervention required for {parents_db.manual_intervention_required_expense_count} expenses for {file_path}"
             send_discord_message(message)
-        send_discord_message(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses")
     else:
-        print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses")
+        print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {file_path}")
     
     
 def send_discord_message(message):
