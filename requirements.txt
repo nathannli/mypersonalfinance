@@ -6,3 +6,4 @@ fastexcel
 pandas
 python-dotenv
 pre-commit
+requests
