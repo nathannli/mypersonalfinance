@@ -3,7 +3,7 @@ from classes.db.generics.finance_db import FinanceDB
 import polars as pl
 
 class ParentsFinanceDB(FinanceDB):
-    
+
     cron: bool
     manual_intervention_required_expense_count: int = 0
 

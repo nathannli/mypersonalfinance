@@ -88,12 +88,12 @@ def run(file_path: str, cron: bool):
             send_discord_message(message)
     else:
         print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {file_path}")
-    
-    
+
+
 def send_discord_message(message):
     payload_dict = {"message": message}
     requests.post(DISCORD_ALERT_BOT_URL, json=json.dumps(payload_dict))
-    
+
 
 
 if __name__ == "__main__":
