@@ -132,7 +132,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     file_path = args.filepath
-    cron = False if args.cron else True
+    cron = True if args.cron else False
 
     if file_path.startswith("ftp://"):
         local_file_path = fetch_ftp_file(file_path)
@@ -143,6 +143,12 @@ if __name__ == "__main__":
         run(local_file_path, cron)
     except KeyboardInterrupt:
         print("Keyboard interrupt")
+        exit()
+    except Exception as e:
+        if cron:
+            send_discord_message(f"Error for {file_path}: {e}")
+        else:
+            print(f"Error for {file_path}: {e}")
         exit()
     finally:
         if local_file_path != file_path:
