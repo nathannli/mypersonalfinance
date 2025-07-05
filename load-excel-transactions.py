@@ -2,6 +2,9 @@ import argparse
 import json
 import polars as pl
 import requests
+import urllib.request
+import tempfile
+import os
 from classes.db.parents_finance_db import ParentsFinanceDB
 
 DISCORD_ALERT_BOT_URL = "http://195.168.1.95:30007/alert"
@@ -96,6 +99,26 @@ def send_discord_message(message):
 
 
 
+
+def fetch_ftp_file(ftp_url: str) -> str:
+    """
+    Downloads a file from the given FTP URL to a temporary local file.
+
+    Args:
+        ftp_url (str): The FTP URL of the file to download.
+
+    Returns:
+        str: The path to the downloaded local temporary file.
+    """
+    tmp_file = tempfile.NamedTemporaryFile(delete=False)
+    print(f"Downloading {ftp_url} to {tmp_file.name}...")
+    urllib.request.urlretrieve(ftp_url, tmp_file.name)
+    tmp_file.close()
+    return tmp_file.name
+
+
+
+
 if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(
@@ -111,8 +134,16 @@ if __name__ == "__main__":
     file_path = args.filepath
     cron = False if args.cron else True
 
+    if file_path.startswith("ftp://"):
+        local_file_path = fetch_ftp_file(file_path)
+    else:
+        local_file_path = file_path
+
     try:
-        run(file_path, cron)
+        run(local_file_path, cron)
     except KeyboardInterrupt:
         print("Keyboard interrupt")
         exit()
+    finally:
+        if local_file_path != file_path:
+            os.remove(local_file_path)
