@@ -1,5 +1,5 @@
 import argparse
-import json
+import re
 import polars as pl
 import requests
 import urllib.request
@@ -10,7 +10,7 @@ from classes.db.parents_finance_db import ParentsFinanceDB
 DISCORD_ALERT_BOT_URL = "http://195.168.1.95:30007/alert"
 DEBUG = True
 
-def run(file_path: str, cron: bool):
+def run(file_path: str, cron: bool, original_file_path: str):
 
     # chequing file check
     chequing_file = False
@@ -85,17 +85,26 @@ def run(file_path: str, cron: bool):
 
     print("\n\n")
     if cron:
-        send_discord_message(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {file_path}")
+        send_discord_message(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}")
         if parents_db.manual_intervention_required_expense_count > 0:
-            message = f"Manual intervention required for {parents_db.manual_intervention_required_expense_count} expenses for {file_path}"
+            message = f"Manual intervention required for {parents_db.manual_intervention_required_expense_count} expenses for {original_file_path}"
             send_discord_message(message)
     else:
-        print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {file_path}")
+        print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}")
+
+
+def obscure_credentials(message):
+    # Regex to find URLs with credentials: scheme://username:password@host/...
+    return re.sub(
+        r'(ftp://)([^:/\s]+):([^@/\s]+)@',
+        r'\1nnn:nnn@',
+        message
+    )
 
 
 def send_discord_message(message):
-    payload_dict = {"message": message}
-    requests.post(DISCORD_ALERT_BOT_URL, json=json.dumps(payload_dict))
+    payload_dict = {"message": obscure_credentials(message)}
+    requests.post(DISCORD_ALERT_BOT_URL, json=payload_dict)
 
 
 
@@ -140,7 +149,7 @@ if __name__ == "__main__":
         local_file_path = file_path
 
     try:
-        run(local_file_path, cron)
+        run(local_file_path, cron, file_path)
     except KeyboardInterrupt:
         print("Keyboard interrupt")
         exit()
