@@ -1,0 +1,1 @@
+0 21 * * 5 TZ=America/New_York /home/nathan/github/mypersonalfinance/bin/parents-db-cron.sh >> /home/nathan/logs/parents-db-cron.log 2>&1

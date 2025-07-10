@@ -44,7 +44,7 @@ class WealthsimpleStatement(CreditCardStatement):
         df7 = df6.filter(pl.col("cost") < 0)
 
         # remove rows where merchant contains ("rogers", "amex")
-        df8 = df7.filter(~pl.col("merchant").str.to_lowercase().str.contains("rogers|amex"))
+        df8 = df7.filter(~pl.col("merchant").str.to_lowercase().str.contains("rogers|amex|bmo"))
 
         # remove rows where merchant equals to "Transfer out"
         df9 = df8.filter(pl.col("merchant") != "Transfer out")
