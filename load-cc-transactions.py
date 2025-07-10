@@ -9,6 +9,36 @@ from classes.cc.rogers import RogersStatement
 from classes.cc.wealthsimple import WealthsimpleStatement
 
 from sys import exit
+import os
+
+
+def extract_card_type_from_filename(file_path: str) -> str:
+    """
+    Extract the card type from the filename.
+
+    Args:
+        file_path: Path to the transaction data file
+
+    Returns:
+        str: The extracted card type
+
+    Raises:
+        ValueError: If the card type cannot be determined from the filename
+    """
+    # Get the base filename without directory path
+    base_filename = os.path.basename(file_path)
+
+    # List of valid card types
+    valid_card_types = ["amex", "rogers", "simplii_visa", "bmo", "wealthsimple"]
+
+    # Check if any of the valid card types are in the filename
+    for card_type in valid_card_types:
+        if card_type in base_filename:
+            return card_type
+
+    # If no valid card type is found, raise an error
+    raise ValueError(f"Could not determine card type from filename: {base_filename}. "
+                     f"Expected one of: {', '.join(valid_card_types)}")
 
 
 def insert_df_to_postgres(df: pl.DataFrame, finance_db: FinanceDB, card_type: str) -> int:
@@ -64,8 +94,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--type",
         choices=["amex", "rogers", "simplii_visa", "bmo", "wealthsimple"],
-        required=True,
-        help="Type of credit card data to process (amex or rogers or simplii_visa or bmo or wealthsimple)",
+        required=False,
+        default=None,
+        help="Type of credit card data to process. If not provided, will be determined from the filename.",
     )
     parser.add_argument(
         "--filepath", required=True, help="Path to the transaction data csv file"
@@ -82,12 +113,18 @@ if __name__ == "__main__":
     try:
         # Get file path and card type from arguments
         file_path = args.filepath
-        card_type = args.type
+        card_type = args.type if args.type is not None else None
         database_name = args.database
-    except Exception:
+
+        if not card_type:
+            # if below function fails, it will throw an error
+            card_type = extract_card_type_from_filename(file_path)
+            print(f"Successfully determined card type from filename: {card_type}")
+
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
         parser.print_help()
         exit(1)
-
 
     # Load data based on card type
     if card_type == "amex":

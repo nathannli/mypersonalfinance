@@ -9,26 +9,26 @@ class FinanceDB(PostgresDB):
         super().__init__(database_name=database_name, debug=debug)
 
     @abstractmethod
-    def insert_expense(self, date: date, merchant: str, cost: float) -> None:
+    def insert_expense(self, *_: Any,**__: Any) -> None:
         """
         Insert an expense into the database.
         Ask the user to select a category and subcategory for the expense.
         """
-        return NotImplementedError
+        return
 
     @abstractmethod
-    def get_auto_match_category(self, merchant: str):
+    def get_auto_match_category(self, merchant: str) -> Any:
         """
         Get the category and subcategory for the merchant.
         """
-        return NotImplementedError
+        return
 
     @abstractmethod
     def insert_into_auto_match(self, merchant: str, category: str, subcategory: str) -> None:
         """
         Insert a new merchant into the auto_match table.
         """
-        return NotImplementedError
+        return
 
     def _check_exists(self, table: str, filters: dict[str, Any]) -> bool:
         """

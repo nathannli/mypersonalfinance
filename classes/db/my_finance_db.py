@@ -75,12 +75,14 @@ class MyFinanceDB(FinanceDB):
             subcategory_id = self.get_subcategory_id_from_name(subcategory)
             category_id = self.get_category_id_from_subcategory_id(subcategory_id)
         # else user input
-        if not found_match:
+        else:
             df = self.get_subcategory_and_category()
             print("\n\n")
             print(df)
             print("\n\n")
             subcategory_id = input("Enter the subcategory id: ")
+            print(subcategory_id)
+            subcategory_id = int(subcategory_id)
             category_id = self.get_category_id_from_subcategory_id(subcategory_id)
         # if subcategory is reimbursement or if in reimbursement_merchant_ref, need to double check if record already exists (date, merchant only)
         if any(merchant.lower() in reimbursement_merchant.lower() for reimbursement_merchant in reimbursement_merchant_ref) or subcategory_id == self.reimbursement_subcategory_id:
