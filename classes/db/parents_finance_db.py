@@ -39,7 +39,7 @@ class ParentsFinanceDB(FinanceDB):
         else:
             return None
 
-    def insert_expense(self, date: date, merchant: str, cost: float, cc_category: str | None = None) -> None:
+    def insert_expense(self, date: date, merchant: str, cost: float, cc_category: str | None = None) -> int:
         """
         Insert an expense into the database.
         Ask the user to select a category for the expense.
@@ -63,7 +63,7 @@ class ParentsFinanceDB(FinanceDB):
         if category_id is None:
             if self.cron:
                 self.manual_intervention_required_expense_count += 1
-                return
+                return 1
             # Ask user to select category
             df = self.get_category()
             print(df)
@@ -94,6 +94,7 @@ class ParentsFinanceDB(FinanceDB):
                     break
                 else:
                     print("Please enter a valid response (y/n).")
+        return 0
 
     def get_auto_match_category(self, merchant_name: str) -> str | None:
         """
