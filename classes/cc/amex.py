@@ -73,7 +73,8 @@ class AmexStatement(CreditCardStatement):
         # Convert amount strings to decimal numbers, removing dollar signs and commas
         df5 = df4.with_columns(pl.col("cost").str.replace(r"\$", "").str.replace(",", "").str.to_decimal())
 
-        # Filter out rows where cost is negative (we only want expenses)
-        df6 = df5.filter(pl.col("cost") > 0)
+        # Filter out rows where merchant is "PAYMENT RECEIVED - THANK YOU"
+        # This is a bill payment to Amex, not an expense
+        df6 = df5.filter(~pl.col("merchant").str.contains("PAYMENT RECEIVED - THANK YOU"))
 
         self.df = df6
