@@ -6,7 +6,8 @@ from classes.db.my_finance_db import MyFinanceDB
 from classes.db.parents_finance_db import ParentsFinanceDB
 from classes.cc.amex import AmexStatement
 from classes.cc.rogers import RogersStatement
-from classes.cc.wealthsimple import WealthsimpleStatement
+from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
+from classes.cc.wealthsimple_debit import WealthsimpleDebitStatement
 
 from sys import exit
 import os
@@ -29,7 +30,14 @@ def extract_card_type_from_filename(file_path: str) -> str:
     base_filename = os.path.basename(file_path)
 
     # List of valid card types
-    valid_card_types = ["amex", "rogers", "simplii_visa", "bmo", "wealthsimple"]
+    valid_card_types = [
+        "amex",
+        "rogers",
+        "simplii_visa",
+        "bmo",
+        "ws_debit",
+        "ws_credit",
+    ]
 
     # Check if any of the valid card types are in the filename
     for card_type in valid_card_types:
@@ -37,11 +45,15 @@ def extract_card_type_from_filename(file_path: str) -> str:
             return card_type
 
     # If no valid card type is found, raise an error
-    raise ValueError(f"Could not determine card type from filename: {base_filename}. "
-                     f"Expected one of: {', '.join(valid_card_types)}")
+    raise ValueError(
+        f"Could not determine card type from filename: {base_filename}. "
+        f"Expected one of: {', '.join(valid_card_types)}"
+    )
 
 
-def insert_df_to_postgres(df: pl.DataFrame, finance_db: FinanceDB, card_type: str) -> int:
+def insert_df_to_postgres(
+    df: pl.DataFrame, finance_db: FinanceDB, card_type: str
+) -> int:
     """
     Insert the processed credit card data into a PostgreSQL database using Polars.
 
@@ -93,7 +105,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--type",
-        choices=["amex", "rogers", "simplii_visa", "bmo", "wealthsimple"],
+        choices=["amex", "rogers", "simplii_visa", "bmo", "ws_debit", "ws_credit"],
         required=False,
         default=None,
         help="Type of credit card data to process. If not provided, will be determined from the filename.",
@@ -102,7 +114,10 @@ if __name__ == "__main__":
         "--filepath", required=True, help="Path to the transaction data csv file"
     )
     parser.add_argument(
-        "--database", required=True, help="Name of the database to use (finance or parents_finance)"
+        "--database",
+        required=False,
+        default="finance",
+        help="Name of the database to use (finance or parents_finance)",
     )
 
     # Parse arguments and check if any are missing
@@ -135,10 +150,14 @@ if __name__ == "__main__":
         df = SimpliiVisaStatement(file_path=file_path).get_df()
     elif card_type == "bmo":
         df = BMOStatement(file_path=file_path).get_df()
-    elif card_type == "wealthsimple":
-        df = WealthsimpleStatement(file_path=file_path).get_df()
+    elif card_type == "ws_debit":
+        df = WealthsimpleDebitStatement(file_path=file_path).get_df()
+    elif card_type == "ws_credit":
+        df = WealthsimpleCreditStatement(file_path=file_path).get_df()
     else:
-        print(f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo' or 'wealthsimple'.")
+        print(
+            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo' or 'ws_debit' or 'ws_credit'."
+        )
         exit()
 
     if database_name == "finance":
@@ -146,7 +165,9 @@ if __name__ == "__main__":
     elif database_name == "parents_finance":
         finance_db = ParentsFinanceDB(debug=True)
     else:
-        print(f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'.")
+        print(
+            f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'."
+        )
         exit()
 
     # Check if the DataFrame has any rows before inserting
