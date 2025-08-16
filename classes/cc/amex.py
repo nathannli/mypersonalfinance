@@ -1,5 +1,6 @@
-from classes.cc.generics.credit_card_statement import CreditCardStatement
 import polars as pl
+
+from classes.cc.generics.credit_card_statement import CreditCardStatement
 
 
 class AmexStatement(CreditCardStatement):
