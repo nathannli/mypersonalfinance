@@ -1,9 +1,10 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
 import polars as pl
 
-class WealthsimpleStatement(CreditCardStatement):
+
+class WealthsimpleDebitStatement(CreditCardStatement):
     def __init__(self, file_path: str):
-        super().__init__(type="wealthsimple", file_path=file_path)
+        super().__init__(type="ws_debit", file_path=file_path)
 
     def load_data(self) -> None:
         """
@@ -44,7 +45,9 @@ class WealthsimpleStatement(CreditCardStatement):
         df7 = df6.filter(pl.col("cost") < 0)
 
         # remove rows where merchant contains ("rogers", "amex")
-        df8 = df7.filter(~pl.col("merchant").str.to_lowercase().str.contains("rogers|amex|bmo"))
+        df8 = df7.filter(
+            ~pl.col("merchant").str.to_lowercase().str.contains("rogers|amex|bmo")
+        )
 
         # remove rows where merchant equals to "Transfer out"
         df9 = df8.filter(pl.col("merchant") != "Transfer out")
