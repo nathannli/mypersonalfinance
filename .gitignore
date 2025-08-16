@@ -10,3 +10,5 @@ data-files/
 *.pyz
 *.pywz
 *.pywz
+
+.DS_Store
