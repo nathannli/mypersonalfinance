@@ -1,9 +1,11 @@
 from datetime import date
-from classes.db.generics.finance_db import FinanceDB
+
 import polars as pl
 
-class ParentsFinanceDB(FinanceDB):
+from classes.db.generics.finance_db import FinanceDB
 
+
+class ParentsFinanceDB(FinanceDB):
     cron: bool
     manual_intervention_required_expense_count: int = 0
 
@@ -16,7 +18,11 @@ class ParentsFinanceDB(FinanceDB):
         Get all categories.
         """
         query = "select id, name as category from categories"
-        return pl.DataFrame(self.select(query), schema={"id": pl.Int64, "category": pl.Utf8}, orient="row")
+        return pl.DataFrame(
+            self.select(query),
+            schema={"id": pl.Int64, "category": pl.Utf8},
+            orient="row",
+        )
 
     def get_category_name_from_id(self, category_id: int) -> str:
         """
@@ -35,11 +41,15 @@ class ParentsFinanceDB(FinanceDB):
             return result[0][0]
         elif len(result) > 1:
             print(f"Multiple categories found for {category_name}. Something is wrong.")
-            raise ValueError(f"Multiple categories found for {category_name}. Something is wrong.")
+            raise ValueError(
+                f"Multiple categories found for {category_name}. Something is wrong."
+            )
         else:
             return None
 
-    def insert_expense(self, date: date, merchant: str, cost: float, cc_category: str | None = None) -> int:
+    def insert_expense(
+        self, date: date, merchant: str, cost: float, cc_category: str | None = None
+    ) -> int:
         """
         Insert an expense into the database.
         Ask the user to select a category for the expense.
@@ -71,10 +81,12 @@ class ParentsFinanceDB(FinanceDB):
                 category_id = input("Enter the category id: ")
                 try:
                     category_id = int(category_id)
-                    if category_id in df['id'].to_list():
+                    if category_id in df["id"].to_list():
                         break
                     else:
-                        print(f"Category ID {category_id} not found. Please enter a valid category ID.")
+                        print(
+                            f"Category ID {category_id} not found. Please enter a valid category ID."
+                        )
                 except ValueError:
                     print("Please enter a valid integer for category ID.")
         # if category ignore is selected, then do not insert row in database
@@ -88,7 +100,9 @@ class ParentsFinanceDB(FinanceDB):
             while True:
                 add_to_auto_match = input("Add to auto_match table? (y/n): ")
                 if add_to_auto_match == "y":
-                    self.insert_into_auto_match(merchant, self.get_category_name_from_id(category_id))
+                    self.insert_into_auto_match(
+                        merchant, self.get_category_name_from_id(category_id)
+                    )
                     break
                 elif add_to_auto_match == "n":
                     break
@@ -103,7 +117,9 @@ class ParentsFinanceDB(FinanceDB):
         query = "select merchant_category from auto_match where merchant_name = %s"
         result = self.select(query, (merchant_name,))
         if len(result) > 1:
-            raise ValueError(f"Multiple categories found for {merchant_name}. Something is wrong.")
+            raise ValueError(
+                f"Multiple categories found for {merchant_name}. Something is wrong."
+            )
         elif len(result) == 1:
             return result[0][0]
         else:
@@ -115,15 +131,21 @@ class ParentsFinanceDB(FinanceDB):
                 if item[0] in merchant_name.lower():
                     substring_matches.append(item[1])
             if len(substring_matches) > 1:
-                raise ValueError(f"Multiple categories found for {merchant_name}. Something is wrong.")
+                raise ValueError(
+                    f"Multiple categories found for {merchant_name}. Something is wrong."
+                )
             elif len(substring_matches) == 1:
                 return substring_matches[0]
             else:
                 return None
 
-    def insert_into_auto_match(self, merchant_name: str, merchant_category: str) -> None:
+    def insert_into_auto_match(
+        self, merchant_name: str, merchant_category: str
+    ) -> None:
         """
         Insert a new merchant into the auto_match table.
         """
-        query = "insert into auto_match (merchant_name, merchant_category) values (%s, %s)"
+        query = (
+            "insert into auto_match (merchant_name, merchant_category) values (%s, %s)"
+        )
         self.insert(query, (merchant_name, merchant_category))

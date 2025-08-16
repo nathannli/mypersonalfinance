@@ -1,17 +1,19 @@
 import argparse
+import os
 import re
+import tempfile
+import urllib.request
+
 import polars as pl
 import requests
-import urllib.request
-import tempfile
-import os
+
 from classes.db.parents_finance_db import ParentsFinanceDB
 
 DISCORD_ALERT_BOT_URL = "http://195.168.1.95:30007/alert"
 DEBUG = True
 
-def run(file_path: str, cron: bool, original_file_path: str):
 
+def run(file_path: str, cron: bool, original_file_path: str):
     # chequing file check
     chequing_file = False
     if "tdcheq" in file_path.lower():
@@ -42,13 +44,15 @@ def run(file_path: str, cron: bool, original_file_path: str):
     )
 
     # rename the columns
-    df2 = df1.rename({
-        "DATE": "date",
-        "DETAILSDescriptions": "merchant",
-        "DR_PAYMENTs": "cost",
-        "ACCT_subCODE": "cc_sub_category",
-        "ACCT_CODE": "cc_category"
-    })
+    df2 = df1.rename(
+        {
+            "DATE": "date",
+            "DETAILSDescriptions": "merchant",
+            "DR_PAYMENTs": "cost",
+            "ACCT_subCODE": "cc_sub_category",
+            "ACCT_CODE": "cc_category",
+        }
+    )
 
     # drop rows where cost is negative
     df3 = df2.filter(pl.col("cost") > 0)
@@ -59,7 +63,7 @@ def run(file_path: str, cron: bool, original_file_path: str):
     # insert the expenses
     new_inserted_rows = 0
     for i, row in enumerate(df3.iter_rows(named=True)):
-        print(f"Processing row {i+1}/{df3.height}")
+        print(f"Processing row {i + 1}/{df3.height}")
         date = row["date"]
         merchant = row["merchant"]
         cost = row["cost"]
@@ -86,28 +90,26 @@ def run(file_path: str, cron: bool, original_file_path: str):
 
     print("\n\n")
     if cron:
-        send_discord_message(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}")
+        send_discord_message(
+            f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}"
+        )
         if parents_db.manual_intervention_required_expense_count > 0:
             message = f"Manual intervention required for {parents_db.manual_intervention_required_expense_count} expenses for {original_file_path}"
             send_discord_message(message)
     else:
-        print(f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}")
+        print(
+            f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}"
+        )
 
 
 def obscure_credentials(message):
     # Regex to find URLs with credentials: scheme://username:password@host/...
-    return re.sub(
-        r'(ftp://)([^:/\s]+):([^@/\s]+)@',
-        r'\1nnn:nnn@',
-        message
-    )
+    return re.sub(r"(ftp://)([^:/\s]+):([^@/\s]+)@", r"\1nnn:nnn@", message)
 
 
 def send_discord_message(message):
     payload_dict = {"message": obscure_credentials(message)}
     requests.post(DISCORD_ALERT_BOT_URL, json=payload_dict)
-
-
 
 
 def fetch_ftp_file(ftp_url: str) -> str:
@@ -125,8 +127,6 @@ def fetch_ftp_file(ftp_url: str) -> str:
     urllib.request.urlretrieve(ftp_url, tmp_file.name)
     tmp_file.close()
     return tmp_file.name
-
-
 
 
 if __name__ == "__main__":

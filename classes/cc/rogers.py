@@ -1,9 +1,10 @@
+import polars as pl
+
 from classes.cc.generics.credit_card_statement import CreditCardStatement
 from classes.cc.ref_data import (
-    rogers_cc_merchant_category_ref,
     manual_cc_merchant_category_ref,
+    rogers_cc_merchant_category_ref,
 )
-import polars as pl
 
 
 class RogersStatement(CreditCardStatement):

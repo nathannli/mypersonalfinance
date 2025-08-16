@@ -1,6 +1,7 @@
-from classes.cc.generics.credit_card_statement import CreditCardStatement
 import polars as pl
 from wealthsimpleton import wealthsimpleton as ws
+
+from classes.cc.generics.credit_card_statement import CreditCardStatement
 
 
 class WealthsimpleCreditStatement(CreditCardStatement):

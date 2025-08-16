@@ -1,9 +1,12 @@
 from datetime import date
+
 import polars as pl
+
+from classes.cc.ref_data import reimbursement_merchant_ref
+from classes.cc.rogers import RogersStatement
 from classes.cc.simplii_visa import SimpliiVisaStatement
 from classes.db.generics.finance_db import FinanceDB
-from classes.cc.rogers import RogersStatement
-from classes.cc.ref_data import reimbursement_merchant_ref
+
 
 class MyFinanceDB(FinanceDB):
     reimbursement_subcategory_id = 14
@@ -25,7 +28,9 @@ class MyFinanceDB(FinanceDB):
         query = "select category_id from subcategories where id = %s"
         return self.select(query, (subcategory_id,))[0][0]
 
-    def get_category_and_subcategory_name_from_subcategory_id(self, subcategory_id: int) -> tuple[str, str]:
+    def get_category_and_subcategory_name_from_subcategory_id(
+        self, subcategory_id: int
+    ) -> tuple[str, str]:
         """
         Get the category and subcategory name from the subcategory id.
         """
@@ -40,7 +45,7 @@ class MyFinanceDB(FinanceDB):
         schema = {
             "subcategory_id": pl.Int64,
             "subcategory": pl.Utf8,
-            "category": pl.Utf8
+            "category": pl.Utf8,
         }
         return pl.DataFrame(self.select(query), schema=schema, orient="row")
 
@@ -50,7 +55,14 @@ class MyFinanceDB(FinanceDB):
         """
         return self._check_exists("expenses", {"date": date, "merchant": merchant})
 
-    def insert_expense(self, date: date, merchant: str, cost: float, card_type: str, cc_category: str | None = None) -> None:
+    def insert_expense(
+        self,
+        date: date,
+        merchant: str,
+        cost: float,
+        card_type: str,
+        cc_category: str | None = None,
+    ) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
         category = None
         subcategory = None
@@ -85,7 +97,13 @@ class MyFinanceDB(FinanceDB):
             subcategory_id = int(subcategory_id)
             category_id = self.get_category_id_from_subcategory_id(subcategory_id)
         # if subcategory is reimbursement or if in reimbursement_merchant_ref, need to double check if record already exists (date, merchant only)
-        if any(merchant.lower() in reimbursement_merchant.lower() for reimbursement_merchant in reimbursement_merchant_ref) or subcategory_id == self.reimbursement_subcategory_id:
+        if (
+            any(
+                merchant.lower() in reimbursement_merchant.lower()
+                for reimbursement_merchant in reimbursement_merchant_ref
+            )
+            or subcategory_id == self.reimbursement_subcategory_id
+        ):
             if self.check_if_reimbursement_expense_exists(date, merchant):
                 print(f"Record already exists for {date} at {merchant}. Skipping...")
                 return
@@ -102,7 +120,11 @@ class MyFinanceDB(FinanceDB):
                 if add_to_auto_match == "y":
                     # check if category and subcategory are not None, if they are None, get the names from the database
                     if category is None or subcategory is None:
-                        category, subcategory = self.get_category_and_subcategory_name_from_subcategory_id(subcategory_id)
+                        category, subcategory = (
+                            self.get_category_and_subcategory_name_from_subcategory_id(
+                                subcategory_id
+                            )
+                        )
                     self.insert_into_auto_match(merchant, category, subcategory)
                     break
                 elif add_to_auto_match == "n":
@@ -117,7 +139,9 @@ class MyFinanceDB(FinanceDB):
         query = "select merchant_category, merchant_subcategory from merchant_name_auto_match where merchant_name = %s"
         result = self.select(query, (merchant,))
         if len(result) > 1:
-            raise ValueError(f"Multiple categories found for {merchant}. Something is wrong.")
+            raise ValueError(
+                f"Multiple categories found for {merchant}. Something is wrong."
+            )
         elif len(result) == 1:
             return result[0]
         else:
@@ -129,13 +153,17 @@ class MyFinanceDB(FinanceDB):
                 if item[0] in merchant.lower():
                     substring_matches.append((item[1], item[2]))
             if len(substring_matches) > 1:
-                raise ValueError(f"Multiple categories found for {merchant}. Something is wrong.")
+                raise ValueError(
+                    f"Multiple categories found for {merchant}. Something is wrong."
+                )
             elif len(substring_matches) == 1:
                 return substring_matches[0]
             else:
                 return None
 
-    def insert_into_auto_match(self, merchant: str, category: str, subcategory: str) -> None:
+    def insert_into_auto_match(
+        self, merchant: str, category: str, subcategory: str
+    ) -> None:
         """
         Insert a new merchant into the auto_match table.
         """

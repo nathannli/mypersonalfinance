@@ -1,15 +1,16 @@
 from abc import abstractmethod
 from datetime import date
-from classes.db.generics.database import PostgresDB
 from typing import Any
 
-class FinanceDB(PostgresDB):
+from classes.db.generics.database import PostgresDB
 
+
+class FinanceDB(PostgresDB):
     def __init__(self, database_name: str, debug: bool = False):
         super().__init__(database_name=database_name, debug=debug)
 
     @abstractmethod
-    def insert_expense(self, *_: Any,**__: Any) -> None:
+    def insert_expense(self, *_: Any, **__: Any) -> None:
         """
         Insert an expense into the database.
         Ask the user to select a category and subcategory for the expense.
@@ -24,7 +25,9 @@ class FinanceDB(PostgresDB):
         return
 
     @abstractmethod
-    def insert_into_auto_match(self, merchant: str, category: str, subcategory: str) -> None:
+    def insert_into_auto_match(
+        self, merchant: str, category: str, subcategory: str
+    ) -> None:
         """
         Insert a new merchant into the auto_match table.
         """
@@ -40,13 +43,17 @@ class FinanceDB(PostgresDB):
         return len(self.select(query, params)) > 0
 
     def check_if_expense_exists(self, date: date, merchant: str, cost: float) -> bool:
-        return self._check_exists("expenses", {"date": date, "merchant": merchant, "cost": cost})
+        return self._check_exists(
+            "expenses", {"date": date, "merchant": merchant, "cost": cost}
+        )
 
     def get_expense_id(self, date: date, merchant: str, cost: float) -> int:
         """
         Get the id of an expense in the database.
         """
-        query = "select id from expenses where date = %s and merchant = %s and cost = %s"
+        query = (
+            "select id from expenses where date = %s and merchant = %s and cost = %s"
+        )
         result = self.select(query, (date, merchant, cost))
         return result[0][0]
 

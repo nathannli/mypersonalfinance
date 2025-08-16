@@ -1,6 +1,7 @@
+import polars as pl
+
 from classes.cc.generics.credit_card_statement import CreditCardStatement
 from classes.cc.ref_data import simplii_visa_cc_merchant_name_to_category_ref
-import polars as pl
 
 
 class SimpliiVisaStatement(CreditCardStatement):

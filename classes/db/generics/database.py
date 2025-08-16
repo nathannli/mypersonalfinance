@@ -1,14 +1,16 @@
-from abc import ABC
-from dotenv import load_dotenv
 import os
+from abc import ABC
+
 import polars as pl
 import psycopg
+from dotenv import load_dotenv
 
 
 class PostgresDB(ABC):
     """
     Abstract base class for Postgres databases.
     """
+
     pl.Config.set_fmt_str_lengths(900)
     pl.Config.set_tbl_width_chars(900)
     pl.Config.set_tbl_rows(900)
@@ -28,7 +30,7 @@ class PostgresDB(ABC):
         print(f"{dotenv_path=}")
         load_dotenv(dotenv_path=dotenv_path)
         self.database_name = database_name
-        self.uri = f"{os.getenv("POSTGRES_CONNECTION_STRING")}/{self.database_name}"
+        self.uri = f"{os.getenv('POSTGRES_CONNECTION_STRING')}/{self.database_name}"
         self.debug = debug
         if self.debug:
             print(f"{self.uri=}")

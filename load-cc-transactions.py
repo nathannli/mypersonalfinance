@@ -1,16 +1,17 @@
+import os
+from sys import exit
+
 import polars as pl
+
+from classes.cc.amex import AmexStatement
 from classes.cc.bmo import BMOStatement
+from classes.cc.rogers import RogersStatement
 from classes.cc.simplii_visa import SimpliiVisaStatement
+from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
+from classes.cc.wealthsimple_debit import WealthsimpleDebitStatement
 from classes.db.generics.finance_db import FinanceDB
 from classes.db.my_finance_db import MyFinanceDB
 from classes.db.parents_finance_db import ParentsFinanceDB
-from classes.cc.amex import AmexStatement
-from classes.cc.rogers import RogersStatement
-from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
-from classes.cc.wealthsimple_debit import WealthsimpleDebitStatement
-
-from sys import exit
-import os
 
 
 def extract_card_type_from_filename(file_path: str) -> str:
