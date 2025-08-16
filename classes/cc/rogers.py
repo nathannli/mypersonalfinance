@@ -1,6 +1,10 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
-from classes.cc.ref_data import rogers_cc_merchant_category_ref, manual_cc_merchant_category_ref
+from classes.cc.ref_data import (
+    rogers_cc_merchant_category_ref,
+    manual_cc_merchant_category_ref,
+)
 import polars as pl
+
 
 class RogersStatement(CreditCardStatement):
     def __init__(self, file_path: str):
@@ -26,17 +30,17 @@ class RogersStatement(CreditCardStatement):
         df = pl.read_csv(source=self.file_path, has_header=True)
 
         # Rename columns to normalized names
-        df1 = df.rename({"Date": "date", "Merchant Name": "merchant", "Amount": "cost", "Merchant Category": "cc_category"})
+        df1 = df.rename(
+            {
+                "Date": "date",
+                "Merchant Name": "merchant",
+                "Amount": "cost",
+                "Merchant Category": "cc_category",
+            }
+        )
 
         # Select only the columns we need
-        df2 = df1.select(
-            [
-                "date",
-                "merchant",
-                "cost",
-                "cc_category"
-            ]
-        )
+        df2 = df1.select(["date", "merchant", "cost", "cc_category"])
 
         # Convert date strings to date objects
         df3 = df2.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
@@ -51,4 +55,7 @@ class RogersStatement(CreditCardStatement):
 
     @staticmethod
     def auto_match_category(cc_category: str) -> tuple[str, str] | None:
-        return (manual_cc_merchant_category_ref.get(cc_category) or rogers_cc_merchant_category_ref.get(cc_category)) or None
+        return (
+            manual_cc_merchant_category_ref.get(cc_category)
+            or rogers_cc_merchant_category_ref.get(cc_category)
+        ) or None

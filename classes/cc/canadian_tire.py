@@ -1,6 +1,7 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
 import polars as pl
 
+
 class CanadianTireStatement(CreditCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="canadian_tire", file_path=file_path)
@@ -17,12 +18,22 @@ class CanadianTireStatement(CreditCardStatement):
         # Find the header row that contains 'REF', 'TRANSACTION DATE', 'POSTED DATE', 'TYPE', 'DESCRIPTION', 'Category', 'AMOUNT'
         header_row = None
         for i, row in enumerate(df.iter_rows()):
-            if "REF" in row and "TRANSACTION DATE" in row and "POSTED DATE" in row and "TYPE" in row and "DESCRIPTION" in row and "Category" in row and "AMOUNT" in row:
+            if (
+                "REF" in row
+                and "TRANSACTION DATE" in row
+                and "POSTED DATE" in row
+                and "TYPE" in row
+                and "DESCRIPTION" in row
+                and "Category" in row
+                and "AMOUNT" in row
+            ):
                 header_row = i
                 break
 
         if header_row is None:
-            raise ValueError("Could not find header row with 'REF', 'TRANSACTION DATE', 'POSTED DATE', 'TYPE', 'DESCRIPTION', 'Category', 'AMOUNT'")
+            raise ValueError(
+                "Could not find header row with 'REF', 'TRANSACTION DATE', 'POSTED DATE', 'TYPE', 'DESCRIPTION', 'Category', 'AMOUNT'"
+            )
 
         # Filter rows after the header row and drop unnecessary columns
         df1 = (

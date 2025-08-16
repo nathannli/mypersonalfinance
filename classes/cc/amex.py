@@ -1,6 +1,7 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
 import polars as pl
 
+
 class AmexStatement(CreditCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="amex", file_path=file_path)
@@ -32,7 +33,9 @@ class AmexStatement(CreditCardStatement):
                 break
 
         if header_row is None:
-            raise ValueError("Could not find header row with 'Date', 'Description', 'Amount'")
+            raise ValueError(
+                "Could not find header row with 'Date', 'Description', 'Amount'"
+            )
 
         # Filter rows after the header row and drop unnecessary columns
         df1 = (
@@ -71,10 +74,14 @@ class AmexStatement(CreditCardStatement):
         df4 = pl.concat([df_with_period, df_without_period])
 
         # Convert amount strings to decimal numbers, removing dollar signs and commas
-        df5 = df4.with_columns(pl.col("cost").str.replace(r"\$", "").str.replace(",", "").str.to_decimal())
+        df5 = df4.with_columns(
+            pl.col("cost").str.replace(r"\$", "").str.replace(",", "").str.to_decimal()
+        )
 
         # Filter out rows where merchant is "PAYMENT RECEIVED - THANK YOU"
         # This is a bill payment to Amex, not an expense
-        df6 = df5.filter(~pl.col("merchant").str.contains("PAYMENT RECEIVED - THANK YOU"))
+        df6 = df5.filter(
+            ~pl.col("merchant").str.contains("PAYMENT RECEIVED - THANK YOU")
+        )
 
         self.df = df6

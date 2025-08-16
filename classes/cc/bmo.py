@@ -1,6 +1,7 @@
 from classes.cc.generics.credit_card_statement import CreditCardStatement
 import polars as pl
 
+
 class BMOStatement(CreditCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="bmo", file_path=file_path)
@@ -27,12 +28,18 @@ class BMOStatement(CreditCardStatement):
         # Find the header row that contains 'Date', 'Description', 'Amount'
         header_row = None
         for i, row in enumerate(df.iter_rows()):
-            if "Posting Date" in row and "Description" in row and "Transaction Amount" in row:
+            if (
+                "Posting Date" in row
+                and "Description" in row
+                and "Transaction Amount" in row
+            ):
                 header_row = i
                 break
 
         if header_row is None:
-            raise ValueError("Could not find header row with 'Posting Date', 'Description', 'Transaction Amount'")
+            raise ValueError(
+                "Could not find header row with 'Posting Date', 'Description', 'Transaction Amount'"
+            )
 
         # Filter rows after the header row and drop unnecessary columns
         df1 = (
@@ -53,9 +60,7 @@ class BMOStatement(CreditCardStatement):
         df3 = df2.with_columns(pl.lit(None).alias("cc_category"))
 
         # Convert date strings to date objects
-        df4 = df3.with_columns(
-            pl.col("date").str.to_date(format="%Y%m%d")
-        )
+        df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y%m%d"))
 
         # Convert amount strings to decimal numbers, removing dollar signs and commas
         df5 = df4.with_columns(pl.col("cost").str.to_decimal())
