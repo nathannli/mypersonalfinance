@@ -1,12 +1,12 @@
 import polars as pl
 from wealthsimpleton import wealthsimpleton as ws
 
-from classes.cc.generics.credit_card_statement import CreditCardStatement
+from classes.cc.generics.online_card_statement import OnlineCardStatement
 
 
-class WealthsimpleCreditStatement(CreditCardStatement):
-    def __init__(self, file_path: str):
-        super().__init__(type="ws_credit", file_path=file_path)
+class WealthsimpleCreditStatement(OnlineCardStatement):
+    def __init__(self):
+        super().__init__(type="ws_credit")
         self.load_data()
 
     def load_data(self) -> None:
@@ -32,19 +32,25 @@ class WealthsimpleCreditStatement(CreditCardStatement):
             Any exceptions from the wealthsimpleton library or data processing
         """
 
-        transactions: list[dict] = ws.get_transactions()
+        transactions: list[dict] = ws.get_transactions(
+            account_activity_url=ws.CREDIT_CARD_LINK
+        )
         df = pl.DataFrame(transactions)
         df1 = df.filter(pl.col("type") == "Purchase")
 
+        # merge description & type
+        df2 = df1.with_columns(
+            pl.concat_str(
+                [pl.col("type"), pl.col("description")], separator=": "
+            ).alias("merchant")
+        )
+
         # Rename columns to more normalized names
-        df2 = df1.rename(
+        df3 = df2.rename(
             {
-                "description": "merchant",
                 "amount": "cost",
             }
         )
-        # Add a dummy cc_category column with None values
-        df3 = df2.with_columns(pl.lit(None).alias("cc_category"))
 
         # Convert date strings to date objects
         df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y-%m-%dT%H:%M:%S"))
@@ -58,4 +64,11 @@ class WealthsimpleCreditStatement(CreditCardStatement):
             .cast(pl.Float64)
         )
 
-        self.df = df5
+        df6 = df5.select(
+            pl.col("date"),
+            pl.col("merchant"),
+            pl.col("cost"),
+            pl.lit(None).alias("cc_category"),
+        )
+
+        self.df = df6

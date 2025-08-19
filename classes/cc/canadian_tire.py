@@ -1,9 +1,9 @@
 import polars as pl
 
-from classes.cc.generics.credit_card_statement import CreditCardStatement
+from classes.cc.generics.file_based_card_statement import FileBasedCardStatement
 
 
-class CanadianTireStatement(CreditCardStatement):
+class CanadianTireStatement(FileBasedCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="canadian_tire", file_path=file_path)
 

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 import polars as pl
 
 
-class CreditCardStatement(ABC):
+class FileBasedCardStatement(ABC):
     type: str
     file_path: str
     df: pl.DataFrame

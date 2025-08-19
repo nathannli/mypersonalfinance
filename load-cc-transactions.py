@@ -112,7 +112,7 @@ if __name__ == "__main__":
         help="Type of credit card data to process. If not provided, will be determined from the filename.",
     )
     parser.add_argument(
-        "--filepath", required=True, help="Path to the transaction data csv file"
+        "--filepath", required=False, help="Path to the transaction data csv file"
     )
     parser.add_argument(
         "--database",
@@ -127,18 +127,39 @@ if __name__ == "__main__":
     # If any required args are missing, parser.parse_args() will exit automatically
     # with the help message, but we'll handle any other issues
     try:
-        # Get file path and card type from arguments
+        card_type = args.type
         file_path = args.filepath
-        card_type = args.type if args.type is not None else None
-        database_name = args.database
 
+        # If card_type not provided, try to infer it from file_path
         if not card_type:
-            # if below function fails, it will throw an error
+            if not file_path:
+                raise ValueError("Either --type or --filepath must be provided")
             card_type = extract_card_type_from_filename(file_path)
             print(f"Successfully determined card type from filename: {card_type}")
 
+        if card_type in {"ws_debit", "ws_credit"}:
+            if file_path:
+                print(
+                    "Wealthsimple doesn't use csv files, no need to provide --filepath"
+                )
+                parser.print_help()
+                exit(1)
+
+        elif card_type in {"amex", "rogers", "simplii_visa", "bmo"}:
+            if not file_path:
+                print(f"Please provide --filepath for {card_type} transactions")
+                parser.print_help()
+                exit(1)
+
+        else:
+            print(f"Unknown card type: {card_type}")
+            parser.print_help()
+            exit(1)
+
+        database_name = args.database
+
     except Exception as e:
-        print(f"ERROR: {str(e)}")
+        print(f"ERROR: {e}")
         parser.print_help()
         exit(1)
 
@@ -152,9 +173,9 @@ if __name__ == "__main__":
     elif card_type == "bmo":
         df = BMOStatement(file_path=file_path).get_df()
     elif card_type == "ws_debit":
-        df = WealthsimpleDebitStatement(file_path=file_path).get_df()
+        df = WealthsimpleDebitStatement().get_df()
     elif card_type == "ws_credit":
-        df = WealthsimpleCreditStatement(file_path=file_path).get_df()
+        df = WealthsimpleCreditStatement().get_df()
     else:
         print(
             f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo' or 'ws_debit' or 'ws_credit'."

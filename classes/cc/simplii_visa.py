@@ -1,10 +1,10 @@
 import polars as pl
 
-from classes.cc.generics.credit_card_statement import CreditCardStatement
+from classes.cc.generics.file_based_card_statement import FileBasedCardStatement
 from classes.cc.ref_data import simplii_visa_cc_merchant_name_to_category_ref
 
 
-class SimpliiVisaStatement(CreditCardStatement):
+class SimpliiVisaStatement(FileBasedCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="simplii_visa", file_path=file_path)
 

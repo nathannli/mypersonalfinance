@@ -1,11 +1,12 @@
 import polars as pl
 
-from classes.cc.generics.credit_card_statement import CreditCardStatement
+from classes.cc.generics.online_card_statement import OnlineCardStatement
+from wealthsimpleton import wealthsimpleton as ws
 
 
-class WealthsimpleDebitStatement(CreditCardStatement):
-    def __init__(self, file_path: str):
-        super().__init__(type="ws_debit", file_path=file_path)
+class WealthsimpleDebitStatement(OnlineCardStatement):
+    def __init__(self):
+        super().__init__(type="ws_debit")
 
     def load_data(self) -> None:
         """
@@ -24,36 +25,70 @@ class WealthsimpleDebitStatement(CreditCardStatement):
         Raises:
             ValueError: If the file doesn't exist or required headers can't be found
         """
-        df = pl.read_csv(source=self.file_path, has_header=True)
+        transactions: list[dict] = ws.get_transactions(
+            account_activity_url=ws.DEBT_LINK
+        )
+        df = pl.DataFrame(transactions)
+        df1 = df.filter(
+            ~(pl.col("type").is_in(["Chequing", "Visa Infinite", "Direct deposit"]))
+        )
+
+        # in pre-authorized debit, ignore AMEX BILL PYMT
+        # in bill pay, ignore BMO MASTERCARD and ROGERS BANK-MASTERCARD
+        df2 = df1.filter(
+            ~(
+                (
+                    (pl.col("type") == "Pre-authorized debit")
+                    & (pl.col("description").is_in(["AMEX BILL PYMT", "Coinbase"]))
+                )
+                | (
+                    (pl.col("type") == "Bill pay")
+                    & (
+                        pl.col("description").is_in(
+                            ["BMO MASTERCARD", "ROGERS BANK-MASTERCARD"]
+                        )
+                    )
+                )
+            )
+        )
+
+        # merge description & type
+        df3 = df2.with_columns(
+            pl.concat_str(
+                [pl.col("type"), pl.col("description")], separator=": "
+            ).alias("merchant")
+        )
 
         # Rename columns to more normalized names
-        df2 = df.rename(
+        df4 = df3.rename(
             {
-                "description": "merchant",
                 "amount": "cost",
             }
         )
         # Add a dummy cc_category column with None values
-        df3 = df2.with_columns(pl.lit(None).alias("cc_category"))
+        df5 = df4.with_columns(pl.lit(None).alias("cc_category"))
 
         # Convert date strings to date objects
-        df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
+        df6 = df5.with_columns(pl.col("date").str.to_date(format="%Y-%m-%dT%H:%M:%S"))
 
-        # Filter out rows where cost is null (we only want expenses)
-        df6 = df4.filter(pl.col("cost").is_not_null())
-
-        # Only keep costs that are negative
-        df7 = df6.filter(pl.col("cost") < 0)
-
-        # remove rows where merchant contains ("rogers", "amex")
-        df8 = df7.filter(
-            ~pl.col("merchant").str.to_lowercase().str.contains("rogers|amex|bmo")
+        # parse float values from after the $ sign
+        df7 = df6.with_columns(
+            pl.col("cost")
+            .str.replace_all("−", "-")  # normalize Unicode minus to ASCII
+            .str.replace_all(",", "")  # strip commas
+            .str.replace_all(r"[^\d.\-]", "")  # keep only digits, dot, minus
+            .cast(pl.Float64)
+            .alias("new_cost")
         )
 
-        # remove rows where merchant equals to "Transfer out"
-        df9 = df8.filter(pl.col("merchant") != "Transfer out")
+        # multiple new_cost by -1
+        df8 = df7.with_columns(pl.col("new_cost").mul(-1))
 
-        # turn cost into positive
-        df10 = df9.with_columns(pl.col("cost").abs().alias("cost"))
+        df9 = df8.select(
+            pl.col("date"),
+            pl.col("merchant"),
+            pl.col("new_cost").alias("cost"),
+            pl.col("cc_category"),
+        )
 
-        self.df = df10
+        self.df = df9

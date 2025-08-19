@@ -1,13 +1,13 @@
 import polars as pl
 
-from classes.cc.generics.credit_card_statement import CreditCardStatement
+from classes.cc.generics.file_based_card_statement import FileBasedCardStatement
 from classes.cc.ref_data import (
     manual_cc_merchant_category_ref,
     rogers_cc_merchant_category_ref,
 )
 
 
-class RogersStatement(CreditCardStatement):
+class RogersStatement(FileBasedCardStatement):
     def __init__(self, file_path: str):
         super().__init__(type="rogers", file_path=file_path)
 
