@@ -5,6 +5,7 @@ import polars as pl
 
 from classes.cc.amex import AmexStatement
 from classes.cc.bmo import BMOStatement
+from classes.cc.rbc_cc import RbcCcStatement
 from classes.cc.rogers import RogersStatement
 from classes.cc.simplii_visa import SimpliiVisaStatement
 from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
@@ -36,6 +37,7 @@ def extract_card_type_from_filename(file_path: str) -> str:
         "rogers",
         "simplii_visa",
         "bmo",
+        "rbc_cc",
         "ws_debit",
         "ws_credit",
     ]
@@ -106,7 +108,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--type",
-        choices=["amex", "rogers", "simplii_visa", "bmo", "ws_debit", "ws_credit"],
+        choices=[
+            "amex",
+            "rogers",
+            "simplii_visa",
+            "bmo",
+            "rbc_cc",
+            "ws_debit",
+            "ws_credit",
+        ],
         required=False,
         default=None,
         help="Type of credit card data to process. If not provided, will be determined from the filename.",
@@ -145,7 +155,7 @@ if __name__ == "__main__":
                 parser.print_help()
                 exit(1)
 
-        elif card_type in {"amex", "rogers", "simplii_visa", "bmo"}:
+        elif card_type in {"amex", "rogers", "simplii_visa", "bmo", "rbc_cc"}:
             if not file_path:
                 print(f"Please provide --filepath for {card_type} transactions")
                 parser.print_help()
@@ -172,13 +182,15 @@ if __name__ == "__main__":
         df = SimpliiVisaStatement(file_path=file_path).get_df()
     elif card_type == "bmo":
         df = BMOStatement(file_path=file_path).get_df()
+    elif card_type == "rbc_cc":
+        df = RbcCcStatement(file_path=file_path).get_df()
     elif card_type == "ws_debit":
         df = WealthsimpleDebitStatement().get_df()
     elif card_type == "ws_credit":
         df = WealthsimpleCreditStatement().get_df()
     else:
         print(
-            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo' or 'ws_debit' or 'ws_credit'."
+            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'bmo' or 'rbc_cc' or 'ws_debit' or 'ws_credit'."
         )
         exit()
 
