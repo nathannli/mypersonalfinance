@@ -26,7 +26,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
             ValueError: If the file doesn't exist or required headers can't be found
         """
         transactions: list[dict] = ws.get_transactions(
-            account_activity_url=ws.DEBT_LINK
+            account_activity_url_suffix=self.config.ws_debt_link
         )
         df = pl.DataFrame(transactions)
         df1 = df.filter(
@@ -35,6 +35,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
 
         # in pre-authorized debit, ignore AMEX BILL PYMT
         # in bill pay, ignore BMO MASTERCARD and ROGERS BANK-MASTERCARD
+        # ignore Interac e-Transfer: Nathan Li Simplii
         df2 = df1.filter(
             ~(
                 (
@@ -48,6 +49,10 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                             ["BMO MASTERCARD", "ROGERS BANK-MASTERCARD"]
                         )
                     )
+                )
+                | (
+                    (pl.col("type") == "Interac e-Transfer")
+                    & (pl.col("description") == "Nathan Li Simplii")
                 )
             )
         )

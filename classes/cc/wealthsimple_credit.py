@@ -33,7 +33,7 @@ class WealthsimpleCreditStatement(OnlineCardStatement):
         """
 
         transactions: list[dict] = ws.get_transactions(
-            account_activity_url=ws.CREDIT_CARD_LINK
+            account_activity_url_suffix=self.config.ws_credit_link
         )
         df = pl.DataFrame(transactions)
         df1 = df.filter(pl.col("type") == "Purchase")
