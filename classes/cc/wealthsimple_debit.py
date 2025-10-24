@@ -46,13 +46,22 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                     (pl.col("type") == "Bill pay")
                     & (
                         pl.col("description").is_in(
-                            ["BMO MASTERCARD", "ROGERS BANK-MASTERCARD"]
+                            [
+                                "BMO MASTERCARD",
+                                "ROGERS BANK-MASTERCARD",
+                                "VISA ROYAL BANK",
+                                "SIMPLII FINANCIAL CASH BACK VISA",
+                            ]
                         )
                     )
                 )
                 | (
                     (pl.col("type") == "Interac e-Transfer")
                     & (pl.col("description") == "Nathan Li Simplii")
+                )
+                | (
+                    (pl.col("type") == "Credit card payment")
+                    & (pl.col("description") == "Wealthsimple credit card")
                 )
             )
         )
