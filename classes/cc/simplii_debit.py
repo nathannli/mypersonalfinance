@@ -50,6 +50,11 @@ class SimpliiDebitStatement(FileBasedCardStatement):
         # filter out bill payments
         df7 = df6.filter(
             ~(pl.col("merchant").str.to_lowercase().str.contains("bill payment"))
+            & ~(
+                pl.col("merchant")
+                .str.to_lowercase()
+                .str.contains("MISCELLANEOUS PAYMENTS Wise Canada".lower())
+            )
         )
 
         self.df = df7
