@@ -40,7 +40,11 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
             ~(
                 (
                     (pl.col("type") == "Pre-authorized debit")
-                    & (pl.col("description").is_in(["AMEX BILL PYMT", "Coinbase"]))
+                    & (
+                        pl.col("description").is_in(
+                            ["AMEX BILL PYMT", "Coinbase", "CDN TIRE"]
+                        )
+                    )
                 )
                 | (
                     (pl.col("type") == "Bill pay")
@@ -58,6 +62,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                 | (
                     (pl.col("type") == "Interac e-Transfer")
                     & (pl.col("description") == "Nathan Li Simplii")
+                    & (pl.col("description") == "Nathan Li")
                 )
                 | (
                     (pl.col("type") == "Credit card payment")
