@@ -92,9 +92,14 @@ class MyFinanceDB(FinanceDB):
             print("\n\n")
             print(df)
             print("\n\n")
-            subcategory_id = input("Enter the subcategory id: ")
-            print(subcategory_id)
-            subcategory_id = int(subcategory_id)
+            while True:
+                subcategory_id = input("Enter the subcategory id: ")
+                print(subcategory_id)
+                try:
+                    subcategory_id = int(subcategory_id)
+                    break
+                except ValueError:
+                    print("Invalid input. Please enter a valid integer.")
             category_id = self.get_category_id_from_subcategory_id(subcategory_id)
         # if subcategory is reimbursement or if in reimbursement_merchant_ref, need to double check if record already exists (date, merchant only)
         if (
