@@ -55,14 +55,23 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                                 "ROGERS BANK-MASTERCARD",
                                 "VISA ROYAL BANK",
                                 "SIMPLII FINANCIAL CASH BACK VISA",
+                                "Triangle MC",
+                                "BRIM FINANCIAL",
                             ]
                         )
                     )
                 )
                 | (
                     (pl.col("type") == "Interac e-Transfer")
-                    & (pl.col("description") == "Nathan Li Simplii")
-                    & (pl.col("description") == "Nathan Li")
+                    & (
+                        pl.col("description").is_in(
+                            [
+                                "Nathan Li Simplii",
+                                "Nathan Li",
+                                "NDAX PAYMENT",
+                            ]
+                        )
+                    )
                 )
                 | (
                     (pl.col("type") == "Credit card payment")
