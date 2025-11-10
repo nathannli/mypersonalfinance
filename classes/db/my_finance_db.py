@@ -1,3 +1,4 @@
+from numpy._core.defchararray import lower
 from datetime import date
 
 import polars as pl
@@ -95,6 +96,9 @@ class MyFinanceDB(FinanceDB):
             while True:
                 subcategory_id = input("Enter the subcategory id: ")
                 print(subcategory_id)
+                if lower(subcategory_id) == "skip":
+                    print("Skipping...")
+                    return
                 try:
                     subcategory_id = int(subcategory_id)
                     break
