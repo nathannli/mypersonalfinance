@@ -1,9 +1,9 @@
-import os
 from abc import ABC
 
 import polars as pl
 import psycopg
-from dotenv import load_dotenv
+
+from classes.config import Config
 
 
 class PostgresDB(ABC):
@@ -16,23 +16,16 @@ class PostgresDB(ABC):
     pl.Config.set_tbl_rows(900)
 
     database_name: str
-    debug: bool
     uri: str
 
     def __init__(self, database_name: str, debug: bool = False):
         """
         Initialize the PostgresDB instance.
         """
-        # Get the current working directory and find .env file
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.abspath(os.path.join(current_dir, "../../.."))
-        dotenv_path = os.path.join(project_root, ".env")
-        print(f"{dotenv_path=}")
-        load_dotenv(dotenv_path=dotenv_path)
+        self.config = Config(debug=debug)
         self.database_name = database_name
-        self.uri = f"{os.getenv('POSTGRES_CONNECTION_STRING')}/{self.database_name}"
-        self.debug = debug
-        if self.debug:
+        self.uri = f"{self.config.postgres_connection_string}/{self.database_name}"
+        if self.config.debug:
             print(f"{self.uri=}")
             print(f"{self.database_name=}")
 
@@ -52,7 +45,7 @@ class PostgresDB(ABC):
         """
         Insert data into the database.
         """
-        if self.debug:
+        if self.config.debug:
             print(f"{query=}")
             print(f"{args=}")
         with self.connect() as conn:
@@ -64,7 +57,7 @@ class PostgresDB(ABC):
         """
         Select data from the database.
         """
-        if self.debug:
+        if self.config.debug:
             print(f"{query=}")
             print(f"{args=}")
         with self.connect() as conn:

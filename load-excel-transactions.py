@@ -9,7 +9,8 @@ import requests
 
 from classes.db.parents_finance_db import ParentsFinanceDB
 
-DISCORD_ALERT_BOT_URL = "http://195.168.1.95:30007/alert"
+RPI_IP = "10.0.0.7"
+DISCORD_ALERT_BOT_URL = f"http://{RPI_IP}:30007/alert"
 DEBUG = True
 
 

@@ -26,7 +26,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
             ValueError: If the file doesn't exist or required headers can't be found
         """
         transactions: list[dict] = ws.get_transactions(
-            account_activity_url=ws.DEBT_LINK
+            account_activity_url_suffix=self.config.ws_debt_link
         )
         df = pl.DataFrame(transactions)
         df1 = df.filter(
@@ -35,19 +35,47 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
 
         # in pre-authorized debit, ignore AMEX BILL PYMT
         # in bill pay, ignore BMO MASTERCARD and ROGERS BANK-MASTERCARD
+        # ignore Interac e-Transfer: Nathan Li Simplii
         df2 = df1.filter(
             ~(
                 (
                     (pl.col("type") == "Pre-authorized debit")
-                    & (pl.col("description").is_in(["AMEX BILL PYMT", "Coinbase"]))
+                    & (
+                        pl.col("description").is_in(
+                            ["AMEX BILL PYMT", "Coinbase", "CDN TIRE"]
+                        )
+                    )
                 )
                 | (
                     (pl.col("type") == "Bill pay")
                     & (
                         pl.col("description").is_in(
-                            ["BMO MASTERCARD", "ROGERS BANK-MASTERCARD"]
+                            [
+                                "BMO MASTERCARD",
+                                "ROGERS BANK-MASTERCARD",
+                                "VISA ROYAL BANK",
+                                "SIMPLII FINANCIAL CASH BACK VISA",
+                                "Triangle MC",
+                                "BRIM FINANCIAL",
+                            ]
                         )
                     )
+                )
+                | (
+                    (pl.col("type") == "Interac e-Transfer")
+                    & (
+                        pl.col("description").is_in(
+                            [
+                                "Nathan Li Simplii",
+                                "Nathan Li",
+                                "NDAX PAYMENT",
+                            ]
+                        )
+                    )
+                )
+                | (
+                    (pl.col("type") == "Credit card payment")
+                    & (pl.col("description") == "Wealthsimple credit card")
                 )
             )
         )

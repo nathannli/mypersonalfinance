@@ -7,7 +7,6 @@ from classes.cc.generics.online_card_statement import OnlineCardStatement
 class WealthsimpleCreditStatement(OnlineCardStatement):
     def __init__(self):
         super().__init__(type="ws_credit")
-        self.load_data()
 
     def load_data(self) -> None:
         """
@@ -31,9 +30,10 @@ class WealthsimpleCreditStatement(OnlineCardStatement):
         Raises:
             Any exceptions from the wealthsimpleton library or data processing
         """
-
+        print("================================================")
+        print("load data start from wealthsimple_credit.py")
         transactions: list[dict] = ws.get_transactions(
-            account_activity_url=ws.CREDIT_CARD_LINK
+            account_activity_url_suffix=self.config.ws_credit_link
         )
         df = pl.DataFrame(transactions)
         df1 = df.filter(pl.col("type") == "Purchase")
@@ -70,5 +70,7 @@ class WealthsimpleCreditStatement(OnlineCardStatement):
             pl.col("cost"),
             pl.lit(None).alias("cc_category"),
         )
-
+        print("================================================")
+        print("load data end from wealthsimple_credit.py")
+        print(f"{df6=}")
         self.df = df6

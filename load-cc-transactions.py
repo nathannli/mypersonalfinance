@@ -184,6 +184,7 @@ if __name__ == "__main__":
         exit(1)
 
     # Load data based on card type
+    print(f"Loading {card_type} data from {file_path}")
     if card_type == "amex":
         df = AmexStatement(file_path=file_path).get_df()
     elif card_type == "rogers":
@@ -205,7 +206,9 @@ if __name__ == "__main__":
             f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'rbc_cc' or 'ws_debit' or 'ws_credit'."
         )
         exit()
+    print("df loaded")
 
+    print("load db")
     if database_name == "finance":
         finance_db = MyFinanceDB(debug=True)
     elif database_name == "parents_finance":
@@ -215,6 +218,7 @@ if __name__ == "__main__":
             f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'."
         )
         exit()
+    print("db loaded")
 
     # Check if the DataFrame has any rows before inserting
     if df.height > 0:
