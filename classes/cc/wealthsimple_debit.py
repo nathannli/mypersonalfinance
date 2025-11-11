@@ -30,7 +30,16 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
         )
         df = pl.DataFrame(transactions)
         df1 = df.filter(
-            ~(pl.col("type").is_in(["Chequing", "Visa Infinite", "Direct deposit"]))
+            ~(
+                pl.col("type").is_in(
+                    [
+                        "Chequing",
+                        "Visa Infinite",
+                        "Direct deposit",
+                        "Electronic funds transfer",
+                    ]
+                )
+            )
         )
 
         # in pre-authorized debit, ignore AMEX BILL PYMT
@@ -57,6 +66,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                                 "SIMPLII FINANCIAL CASH BACK VISA",
                                 "Triangle MC",
                                 "BRIM FINANCIAL",
+                                "Amazon MBNA",
                             ]
                         )
                     )
@@ -68,7 +78,11 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                             [
                                 "Nathan Li Simplii",
                                 "Nathan Li",
+                                "NATHAN CHI CHUNG LI",
                                 "NDAX PAYMENT",
+                                "KIT MEI TONG",
+                                "Nathan Li EQ Bank",
+                                "Simplii Nathan",
                             ]
                         )
                     )
