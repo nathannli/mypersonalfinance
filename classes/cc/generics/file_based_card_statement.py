@@ -9,6 +9,10 @@ class FileBasedCardStatement(ABC):
     file_path: str
     df: pl.DataFrame
 
+    pl.Config.set_tbl_cols(20)
+    pl.Config.set_tbl_rows(50)
+    pl.Config.set_fmt_str_lengths(1000)
+
     def __init__(self, type: str, file_path: str):
         self.type = type
         self.file_path = file_path
