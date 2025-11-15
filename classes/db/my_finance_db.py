@@ -161,11 +161,7 @@ class MyFinanceDB(FinanceDB):
             for item in result:
                 if item[0] in merchant.lower():
                     substring_matches.append((item[1], item[2]))
-            if len(substring_matches) > 1:
-                raise ValueError(
-                    f"Multiple categories found for {merchant}. Something is wrong."
-                )
-            elif len(substring_matches) == 1:
+            if len(substring_matches) >= 1:
                 return substring_matches[0]
             else:
                 return None
