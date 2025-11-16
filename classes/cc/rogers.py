@@ -36,7 +36,7 @@ class RogersStatement(FileBasedCardStatement):
                 "Date": "date",
                 "Merchant Name": "merchant",
                 "Amount": "cost",
-                "Merchant Category": "cc_category",
+                "Merchant Category Description": "cc_category",
             }
         )
 

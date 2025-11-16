@@ -50,7 +50,7 @@ class AmexStatement(FileBasedCardStatement):
             {
                 "column_1": "date",
                 "column_2": "merchant",
-                "column_4": "cost",
+                "column_5": "cost",
             }
         )
         # Add a dummy cc_category column with None values

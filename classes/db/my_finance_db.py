@@ -93,6 +93,7 @@ class MyFinanceDB(FinanceDB):
             print("\n\n")
             print(df)
             print("\n\n")
+            valid_ids = df.get_column("subcategory_id").to_list()
             while True:
                 subcategory_id = input("Enter the subcategory id: ")
                 print(subcategory_id)
@@ -101,6 +102,11 @@ class MyFinanceDB(FinanceDB):
                     return
                 try:
                     subcategory_id = int(subcategory_id)
+                    if subcategory_id not in valid_ids:
+                        print(
+                            "Invalid subcategory id. Please enter a valid id from the list above."
+                        )
+                        continue
                     break
                 except ValueError:
                     print("Invalid input. Please enter a valid integer.")
