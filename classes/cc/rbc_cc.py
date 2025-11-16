@@ -26,7 +26,7 @@ class RbcCcStatement(FileBasedCardStatement):
         schema = {
             "Account Type": pl.Utf8,
             "Account Number": pl.Utf8,
-            "Transaction Date": pl.Date,
+            "Transaction Date": pl.Utf8,
             "Cheque Number": pl.Utf8,
             "Description 1": pl.Utf8,
             "Description 2": pl.Utf8,
@@ -39,6 +39,10 @@ class RbcCcStatement(FileBasedCardStatement):
             has_header=True,
             schema=schema,
             truncate_ragged_lines=True,
+        )
+
+        df = df.with_columns(
+            pl.col("Transaction Date").str.strptime(pl.Date, "%m/%d/%Y")
         )
 
         # Rename columns to normalized names
@@ -54,5 +58,14 @@ class RbcCcStatement(FileBasedCardStatement):
 
         # mult by -1
         df4 = df3.with_columns(pl.col("cost").mul(-1).cast(pl.Decimal(10, 2)))
+
+        # ignore transactions
+        df4 = df4.filter(
+            ~(
+                pl.col("merchant").str.contains(
+                    "PAYMENT - THANK YOU / PAI EMENT - MERCI"
+                )
+            )
+        )
 
         self.df = df4
