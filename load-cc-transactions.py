@@ -3,7 +3,7 @@ from sys import exit
 
 import polars as pl
 
-from classes.cc.amex import AmexStatement
+from classes.cc.amex import AmexAnnualStatement, AmexStatement
 from classes.cc.bmo import BMOStatement
 from classes.cc.rbc_cc import RbcCcStatement
 from classes.cc.rogers import RogersStatement
@@ -35,6 +35,7 @@ def extract_card_type_from_filename(file_path: str) -> str:
     # List of valid card types
     valid_card_types = [
         "amex",
+        "amex_annual",
         "rogers",
         "simplii_visa",
         "simplii_debit",
@@ -112,6 +113,7 @@ if __name__ == "__main__":
         "--type",
         choices=[
             "amex",
+            "amex_annual",
             "rogers",
             "simplii_visa",
             "simplii_debit",
@@ -160,6 +162,7 @@ if __name__ == "__main__":
 
         elif card_type in {
             "amex",
+            "amex_annual",
             "rogers",
             "simplii_visa",
             "simplii_debit",
@@ -187,6 +190,8 @@ if __name__ == "__main__":
     print(f"Loading {card_type} data from {file_path}")
     if card_type == "amex":
         df = AmexStatement(file_path=file_path).get_df()
+    elif card_type == "amex_annual":
+        df = AmexAnnualStatement(file_path=file_path).get_df()
     elif card_type == "rogers":
         df = RogersStatement(file_path=file_path).get_df()
     elif card_type == "simplii_visa":
@@ -203,7 +208,7 @@ if __name__ == "__main__":
         df = WealthsimpleCreditStatement().get_df()
     else:
         print(
-            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'rbc_cc' or 'ws_debit' or 'ws_credit'."
+            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'rbc_cc' or 'ws_debit' or 'ws_credit' or 'amex_annual'."
         )
         exit()
     print("df loaded")

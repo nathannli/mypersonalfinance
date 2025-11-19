@@ -47,14 +47,18 @@ class SimpliiDebitStatement(FileBasedCardStatement):
         # Filter out rows where cost is null (we only want expenses)
         df6 = df4.filter(pl.col("cost").is_not_null())
 
-        # filter out bill payments
-        df7 = df6.filter(
-            ~(pl.col("merchant").str.to_lowercase().str.contains("bill payment"))
-            & ~(
-                pl.col("merchant")
-                .str.to_lowercase()
-                .str.contains("MISCELLANEOUS PAYMENTS Wise Canada".lower())
+        # Define list of merchants to skip
+        skip_merchants = [
+            "bill payment",
+            "MISCELLANEOUS PAYMENTS Wise Canada",
+            "INTERAC E-TRANSFER SEND nathan wealthsimple",
+        ]
+
+        # filter out transactions from skip list
+        df7 = df6
+        for merchant in skip_merchants:
+            df7 = df7.filter(
+                ~(pl.col("merchant").str.to_lowercase().str.contains(merchant.lower()))
             )
-        )
 
         self.df = df7

@@ -1,6 +1,6 @@
 .env
 classes/__pycache__
-bin/
+bin/donotcommit/
 data-files/
 
 *.pyc

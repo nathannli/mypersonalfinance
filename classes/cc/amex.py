@@ -50,7 +50,7 @@ class AmexStatement(FileBasedCardStatement):
             {
                 "column_1": "date",
                 "column_2": "merchant",
-                "column_4": "cost",
+                "column_5": "cost",
             }
         )
         # Add a dummy cc_category column with None values
@@ -86,3 +86,44 @@ class AmexStatement(FileBasedCardStatement):
         )
 
         self.df = df6
+
+
+class AmexAnnualStatement(FileBasedCardStatement):
+    def __init__(self, file_path: str):
+        super().__init__(type="amex_annual", file_path=file_path)
+
+    def load_data(self) -> None:
+        """
+        Load and process American Express annual statement data from an csv file.
+        """
+        schema = {
+            "Category": pl.Utf8,
+            "Card Member": pl.Utf8,
+            "Account Number": pl.Utf8,
+            "Sub-Category": pl.Utf8,
+            "Date": pl.Utf8,
+            "Month-Billed": pl.Utf8,
+            "Transaction": pl.Utf8,
+            "Charges $": pl.Utf8,
+            "Credits $": pl.Utf8,
+        }
+        df = pl.read_csv(source=self.file_path, has_header=True, schema=schema)
+        df = df.with_columns(pl.col("Date").str.to_date(format="%d/%m/%Y"))
+        df = df.with_columns(pl.col("Charges $").str.replace(",", "").str.to_decimal())
+        df = df.with_columns(pl.col("Credits $").str.replace(",", "").str.to_decimal())
+
+        # merge Charges $ and Credits $, but credits should be negative
+        df = df.with_columns(pl.col("Credits $").mul(-1))
+        df = df.with_columns(
+            pl.coalesce(pl.col("Charges $"), pl.col("Credits $")).alias("cost")
+        )
+        df = df.select("Date", "Transaction", "cost")
+        df = df.rename(
+            {
+                "Date": "date",
+                "Transaction": "merchant",
+            }
+        )
+        df = df.with_columns(pl.lit(None).alias("cc_category"))
+
+        self.df = df
