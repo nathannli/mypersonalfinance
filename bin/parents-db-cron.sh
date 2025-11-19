@@ -11,13 +11,16 @@ send_discord_notification() {
 
 # Configurable variables
 NAS_IP=195.168.1.14
+NAS_USER=$PARENTS_FINANCE_FTP_USER
+NAS_PASSWORD=$PARENTS_FINANCE_FTP_PASS
+
 
 files_to_process=(
-    "ftp://315NAS:Nl2870wk**@${NAS_IP}/1.2_FamilyExpenseSHARED/CdnTireMC5989_2025.xlsx"
-    "ftp://315NAS:Nl2870wk**@${NAS_IP}/1.2_FamilyExpenseSHARED/CostCoMC1969_2025.xlsx"
-    "ftp://315NAS:Nl2870wk**@${NAS_IP}/1.2_FamilyExpenseSHARED/ROGERMC4804_2025.xlsx"
-    "ftp://315NAS:Nl2870wk**@${NAS_IP}/1.2_FamilyExpenseSHARED/TDCheq0307_YTD2025.xlsx"
-    "ftp://315NAS:Nl2870wk**@${NAS_IP}/1.2_FamilyExpenseSHARED/TDVisa6413_YTD2025.xlsx"
+    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/CdnTireMC5989_2025.xlsx"
+    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/CostCoMC1969_2025.xlsx"
+    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/ROGERMC4804_2025.xlsx"
+    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/TDCheq0307_YTD2025.xlsx"
+    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/TDVisa6413_YTD2025.xlsx"
 )
 
 # Activate the virtual environment
