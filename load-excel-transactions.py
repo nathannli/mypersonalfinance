@@ -30,6 +30,7 @@ MERCHANT_SKIP_KEYWORDS = [
     "LOAN PAYMENT",  # Add merchant keywords here, e.g., "TRANSFER", "PAYMENT"
     "IG FIN SER SFGI  INV",
     "IG FIN SER SFGI INV",
+    "WH000 TFR-TO 4109633",  # td account transfers
 ]
 
 
