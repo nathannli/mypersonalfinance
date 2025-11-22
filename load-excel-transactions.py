@@ -1,15 +1,15 @@
+import urllib
 import argparse
 import os
 import re
 import tempfile
-import urllib.request
 
 import polars as pl
 import requests
 
 from classes.db.parents_finance_db import ParentsFinanceDB
 
-RPI_IP = "10.0.0.7"
+RPI_IP = "195.168.1.7"
 DISCORD_ALERT_BOT_URL = f"http://{RPI_IP}:30007/alert"
 DEBUG = True
 
