@@ -32,6 +32,7 @@ MERCHANT_SKIP_KEYWORDS = [
     "IG FIN SER SFGI INV",
     "WH000 TFR-TO 4109633",  # td account transfers
     "WH005 TFR-TO 4116036",
+    "WH055 TFR-TO C/C",  # chequing account transfers to credit card
 ]
 
 
