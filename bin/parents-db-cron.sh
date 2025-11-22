@@ -14,13 +14,17 @@ NAS_IP=195.168.1.14
 NAS_USER=$PARENTS_FINANCE_FTP_USER
 NAS_PASSWORD=$PARENTS_FINANCE_FTP_PASS
 
+echo "NAS_IP: $NAS_IP"
+echo "NAS_USER: $NAS_USER"
+echo "NAS_PASSWORD: $NAS_PASSWORD"
+
 
 files_to_process=(
-    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/CdnTireMC5989_2025.xlsx"
-    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/CostCoMC1969_2025.xlsx"
-    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/ROGERMC4804_2025.xlsx"
-    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/TDCheq0307_YTD2025.xlsx"
-    "ftp://$NAS_USER:$NAS_PASSWORD@$NAS_IP/1.2_FamilyExpenseSHARED/TDVisa6413_YTD2025.xlsx"
+    "ftp://${NAS_USER}:${NAS_PASSWORD}@${NAS_IP}/1.2_FamilyExpenseSHARED/CdnTireMC5989_2025.xlsx"
+    "ftp://${NAS_USER}:${NAS_PASSWORD}@${NAS_IP}/1.2_FamilyExpenseSHARED/CostCoMC1969_2025.xlsx"
+    "ftp://${NAS_USER}:${NAS_PASSWORD}@${NAS_IP}/1.2_FamilyExpenseSHARED/ROGERMC4804_2025.xlsx"
+    "ftp://${NAS_USER}:${NAS_PASSWORD}@${NAS_IP}/1.2_FamilyExpenseSHARED/TDCheq0307_YTD2025.xlsx"
+    "ftp://${NAS_USER}:${NAS_PASSWORD}@${NAS_IP}/1.2_FamilyExpenseSHARED/TDVisa6413_YTD2025.xlsx"
 )
 
 # Activate the virtual environment
