@@ -29,6 +29,7 @@ CHEQUING_SKIP_KEYWORDS = [
 MERCHANT_SKIP_KEYWORDS = [
     "LOAN PAYMENT",  # Add merchant keywords here, e.g., "TRANSFER", "PAYMENT"
     "IG FIN SER SFGI  INV",
+    "IG FIN SER SFGI INV",
 ]
 
 
