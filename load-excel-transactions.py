@@ -1,17 +1,39 @@
+import urllib
 import argparse
 import os
 import re
 import tempfile
-import urllib.request
 
 import polars as pl
 import requests
 
 from classes.db.parents_finance_db import ParentsFinanceDB
 
-RPI_IP = "10.0.0.7"
+RPI_IP = "195.168.1.7"
 DISCORD_ALERT_BOT_URL = f"http://{RPI_IP}:30007/alert"
 DEBUG = True
+
+# Keywords in cc_sub_category that trigger transaction skipping/deletion
+SKIP_KEYWORDS = [
+    "Tfr=",  # Transfer transactions to delete if they exist
+    "TFR-TO",
+]
+
+# Keywords specific to chequing files that should be skipped
+CHEQUING_SKIP_KEYWORDS = [
+    "Tfr-",  # Transfers in chequing accounts
+    "TFR-TO",
+]
+
+# Keywords in merchant name that trigger transaction skipping
+MERCHANT_SKIP_KEYWORDS = [
+    "LOAN PAYMENT",  # Add merchant keywords here, e.g., "TRANSFER", "PAYMENT"
+    "IG FIN SER SFGI  INV",
+    "IG FIN SER SFGI INV",
+    "WH000 TFR-TO 4109633",  # td account transfers
+    "WH005 TFR-TO 4116036",
+    "WH055 TFR-TO C/C",  # chequing account transfers to credit card
+]
 
 
 def run(file_path: str, cron: bool, original_file_path: str):
@@ -70,16 +92,21 @@ def run(file_path: str, cron: bool, original_file_path: str):
         cost = row["cost"]
         cc_category = row["cc_category"]
         cc_sub_category = row["cc_sub_category"]
-        # special handling for cc_sub_category is Tfr=*
-        if "Tfr=" in cc_sub_category:
+        # special handling for skip keywords - delete if exists and skip
+        if any(keyword in cc_sub_category for keyword in SKIP_KEYWORDS):
             # check if transaction already exists in expenses table
             if parents_db.check_if_expense_exists(date, merchant, cost):
                 # if yes, delete from expenses table
                 expense_id = parents_db.get_expense_id(date, merchant, cost)
                 parents_db.delete_expense(expense_id)
             continue
-        # if tdcheq and cc_sub_category is "Tfr-*", then skip
-        if chequing_file and "Tfr-" in cc_sub_category:
+        # if chequing file, skip transactions with chequing-specific keywords
+        if chequing_file and any(
+            keyword in cc_sub_category for keyword in CHEQUING_SKIP_KEYWORDS
+        ):
+            continue
+        # skip transactions with merchant skip keywords
+        if any(keyword in merchant for keyword in MERCHANT_SKIP_KEYWORDS):
             continue
         # Check if transaction already exists in expenses table
         if not parents_db.check_if_expense_exists(date, merchant, cost):
