@@ -18,47 +18,46 @@ from classes.db.my_finance_db import MyFinanceDB
 from classes.db.parents_finance_db import ParentsFinanceDB
 
 
-def extract_card_type_from_filename(file_path: str) -> str:
+def load_card_statement_df(card_type: str, file_path: str = None) -> pl.DataFrame:
     """
-    Extract the card type from the filename.
+    Load credit card statement data based on card type.
 
     Args:
-        file_path: Path to the transaction data file
+        card_type: Type of credit card
+        file_path: Path to the transaction data file (not needed for ws_debit/ws_credit)
 
     Returns:
-        str: The extracted card type
+        pl.DataFrame: Loaded transaction data
 
     Raises:
-        ValueError: If the card type cannot be determined from the filename
+        ValueError: If invalid card type or missing file path
     """
-    # Get the base filename without directory path
-    base_filename = os.path.basename(file_path)
-
-    # List of valid card types
-    valid_card_types = [
-        "amex",
-        "amex_annual",
-        "rogers",
-        "simplii_visa",
-        "simplii_debit",
-        "bmo",
-        "cibc_mc",
-        "rbc_cc",
-        "td_visa",
-        "ws_debit",
-        "ws_credit",
-    ]
-
-    # Check if any of the valid card types are in the filename
-    for card_type in valid_card_types:
-        if card_type in base_filename:
-            return card_type
-
-    # If no valid card type is found, raise an error
-    raise ValueError(
-        f"Could not determine card type from filename: {base_filename}. "
-        f"Expected one of: {', '.join(valid_card_types)}"
-    )
+    if card_type == "amex":
+        return AmexStatement(file_path=file_path).get_df()
+    elif card_type == "amex_annual":
+        return AmexAnnualStatement(file_path=file_path).get_df()
+    elif card_type == "rogers":
+        return RogersStatement(file_path=file_path).get_df()
+    elif card_type == "simplii_visa":
+        return SimpliiVisaStatement(file_path=file_path).get_df()
+    elif card_type == "simplii_debit":
+        return SimpliiDebitStatement(file_path=file_path).get_df()
+    elif card_type == "bmo":
+        return BMOStatement(file_path=file_path).get_df()
+    elif card_type == "cibc_mc":
+        return CibcMcStatement(file_path=file_path).get_df()
+    elif card_type == "rbc_cc":
+        return RbcCcStatement(file_path=file_path).get_df()
+    elif card_type == "td_visa":
+        return TdVisaStatement(file_path=file_path).get_df()
+    elif card_type == "ws_debit":
+        return WealthsimpleDebitStatement().get_df()
+    elif card_type == "ws_credit":
+        return WealthsimpleCreditStatement().get_df()
+    else:
+        raise ValueError(
+            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'cibc_mc' or 'rbc_cc' or 'td_visa' or 'ws_debit' or 'ws_credit' or 'amex_annual'."
+        )
 
 
 def insert_df_to_postgres(
@@ -99,10 +98,6 @@ def insert_df_to_postgres(
             finance_db.insert_expense(date, merchant, cost, card_type, cc_category)
             new_inserted_rows += 1
 
-    print("\n\n")
-    print(
-        f"Successfully inserted {new_inserted_rows}/{df.height} rows into finance.expenses"
-    )
     return new_inserted_rows
 
 
@@ -111,7 +106,23 @@ if __name__ == "__main__":
 
     # Set up argument parser
     parser = argparse.ArgumentParser(
-        description="Load credit card data into PostgreSQL database"
+        description="Load credit card data into PostgreSQL database",
+        epilog="""
+Usage Examples:
+
+  Single file:
+    python load-cc-transactions.py --type cibc_mc --filepath /path/to/statement.csv --database finance
+
+  Multiple files in folder:
+    python load-cc-transactions.py --type cibc_mc --folder /path/to/statements/ --database finance
+
+  Wealthsimple (online, no file needed):
+    python load-cc-transactions.py --type ws_debit --database finance
+
+Supported card types:
+  amex, amex_annual, rogers, simplii_visa, simplii_debit, bmo, cibc_mc, rbc_cc, td_visa, ws_debit, ws_credit
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--type",
@@ -128,12 +139,16 @@ if __name__ == "__main__":
             "ws_debit",
             "ws_credit",
         ],
-        required=False,
-        default=None,
-        help="Type of credit card data to process. If not provided, will be determined from the filename.",
+        required=True,
+        help="Type of credit card data to process",
     )
     parser.add_argument(
         "--filepath", required=False, help="Path to the transaction data csv file"
+    )
+    parser.add_argument(
+        "--folder",
+        required=False,
+        help="Path to folder containing multiple transaction data csv files",
     )
     parser.add_argument(
         "--database",
@@ -150,18 +165,18 @@ if __name__ == "__main__":
     try:
         card_type = args.type
         file_path = args.filepath
+        folder_path = args.folder
 
-        # If card_type not provided, try to infer it from file_path
-        if not card_type:
-            if not file_path:
-                raise ValueError("Either --type or --filepath must be provided")
-            card_type = extract_card_type_from_filename(file_path)
-            print(f"Successfully determined card type from filename: {card_type}")
+        # Validate that --filepath and --folder are mutually exclusive
+        if file_path and folder_path:
+            raise ValueError(
+                "Cannot provide both --filepath and --folder. Please provide only one."
+            )
 
         if card_type in {"ws_debit", "ws_credit"}:
-            if file_path:
+            if file_path or folder_path:
                 print(
-                    "Wealthsimple doesn't use csv files, no need to provide --filepath"
+                    "Wealthsimple doesn't use csv files, no need to provide --filepath or --folder"
                 )
                 parser.print_help()
                 exit(1)
@@ -177,8 +192,10 @@ if __name__ == "__main__":
             "rbc_cc",
             "td_visa",
         }:
-            if not file_path:
-                print(f"Please provide --filepath for {card_type} transactions")
+            if not file_path and not folder_path:
+                print(
+                    f"Please provide either --filepath or --folder for {card_type} transactions"
+                )
                 parser.print_help()
                 exit(1)
 
@@ -187,6 +204,31 @@ if __name__ == "__main__":
             parser.print_help()
             exit(1)
 
+        # Build list of files to process
+        files_to_process = []
+        if card_type in {"ws_debit", "ws_credit"}:
+            # Wealthsimple cards don't use files, process once with no file
+            files_to_process = [None]
+        elif folder_path:
+            # Validate folder exists
+            if not os.path.isdir(folder_path):
+                raise ValueError(f"Folder does not exist: {folder_path}")
+
+            # Get all files in the folder
+            all_files = [
+                os.path.join(folder_path, f)
+                for f in os.listdir(folder_path)
+                if os.path.isfile(os.path.join(folder_path, f))
+            ]
+
+            if not all_files:
+                raise ValueError(f"Folder is empty: {folder_path}")
+
+            files_to_process = all_files
+            print(f"Found {len(files_to_process)} files in folder: {folder_path}")
+        elif file_path:
+            files_to_process = [file_path]
+
         database_name = args.database
 
     except Exception as e:
@@ -194,38 +236,8 @@ if __name__ == "__main__":
         parser.print_help()
         exit(1)
 
-    # Load data based on card type
-    print(f"Loading {card_type} data from {file_path}")
-    if card_type == "amex":
-        df = AmexStatement(file_path=file_path).get_df()
-    elif card_type == "amex_annual":
-        df = AmexAnnualStatement(file_path=file_path).get_df()
-    elif card_type == "rogers":
-        df = RogersStatement(file_path=file_path).get_df()
-    elif card_type == "simplii_visa":
-        df = SimpliiVisaStatement(file_path=file_path).get_df()
-    elif card_type == "simplii_debit":
-        df = SimpliiDebitStatement(file_path=file_path).get_df()
-    elif card_type == "bmo":
-        df = BMOStatement(file_path=file_path).get_df()
-    elif card_type == "cibc_mc":
-        df = CibcMcStatement(file_path=file_path).get_df()
-    elif card_type == "rbc_cc":
-        df = RbcCcStatement(file_path=file_path).get_df()
-    elif card_type == "td_visa":
-        df = TdVisaStatement(file_path=file_path).get_df()
-    elif card_type == "ws_debit":
-        df = WealthsimpleDebitStatement().get_df()
-    elif card_type == "ws_credit":
-        df = WealthsimpleCreditStatement().get_df()
-    else:
-        print(
-            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'cibc_mc' or 'rbc_cc' or 'td_visa' or 'ws_debit' or 'ws_credit' or 'amex_annual'."
-        )
-        exit()
-    print("df loaded")
-
-    print("load db")
+    # Load database
+    print("Loading database...")
     if database_name == "finance":
         finance_db = MyFinanceDB(debug=True)
     elif database_name == "parents_finance":
@@ -235,15 +247,98 @@ if __name__ == "__main__":
             f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'."
         )
         exit()
-    print("db loaded")
+    print("Database loaded\n")
 
-    # Check if the DataFrame has any rows before inserting
-    if df.height > 0:
+    # Track results per file
+    results = []
+    failed_files = []
+
+    # Process each file
+    for idx, current_file_path in enumerate(files_to_process, 1):
+        # Handle ws_debit/ws_credit which don't use files
+        if current_file_path is None:
+            file_name = f"{card_type} (online)"
+        else:
+            file_name = os.path.basename(current_file_path)
+
+        if len(files_to_process) > 1:
+            print(f"\n{'=' * 80}")
+            print(f"Processing file {idx}/{len(files_to_process)}: {file_name}")
+            print(f"{'=' * 80}\n")
+        else:
+            print(f"Processing: {file_name}\n")
+
         try:
-            insert_df_to_postgres(df=df, finance_db=finance_db, card_type=card_type)
-        except KeyboardInterrupt:
-            print("Keyboard interrupt")
-            exit()
-        print("\n\n")
-    else:
-        print(f"No data to process in the {card_type} file")
+            # Load data based on card type
+            if current_file_path is None:
+                print(f"Loading {card_type} data from online source")
+            else:
+                print(f"Loading {card_type} data from {current_file_path}")
+            df = load_card_statement_df(card_type, current_file_path)
+            print("Data loaded")
+
+            # Check if the DataFrame has any rows before inserting
+            if df.height > 0:
+                try:
+                    inserted_rows = insert_df_to_postgres(
+                        df=df, finance_db=finance_db, card_type=card_type
+                    )
+                    results.append(
+                        {
+                            "file": file_name,
+                            "status": "success",
+                            "inserted": inserted_rows,
+                            "total": df.height,
+                        }
+                    )
+                except KeyboardInterrupt:
+                    print("Keyboard interrupt")
+                    exit()
+            else:
+                print("No data to process in the file")
+                results.append(
+                    {
+                        "file": file_name,
+                        "status": "success",
+                        "inserted": 0,
+                        "total": 0,
+                    }
+                )
+
+        except Exception as e:
+            print(f"ERROR processing file {file_name}: {e}")
+            failed_files.append({"file": file_name, "error": str(e)})
+            results.append(
+                {"file": file_name, "status": "failed", "inserted": 0, "total": 0}
+            )
+            # Continue processing remaining files
+            continue
+
+    # Print summary
+    print("\n" + "=" * 80)
+    print("PROCESSING SUMMARY")
+    print("=" * 80)
+
+    if results:
+        print("\nPer-file breakdown:")
+        for result in results:
+            if result["status"] == "success":
+                print(
+                    f"  ✓ {result['file']}: {result['inserted']}/{result['total']} transactions inserted"
+                )
+            else:
+                print(f"  ✗ {result['file']}: FAILED")
+
+    if failed_files:
+        print(f"\n{len(failed_files)} file(s) failed to process:")
+        for failed in failed_files:
+            print(f"  - {failed['file']}: {failed['error']}")
+
+    total_inserted = sum(r["inserted"] for r in results)
+    total_transactions = sum(r["total"] for r in results)
+    successful_files = sum(1 for r in results if r["status"] == "success")
+
+    print(
+        f"\nTotal: {total_inserted}/{total_transactions} transactions inserted from {successful_files}/{len(files_to_process)} file(s)"
+    )
+    print("=" * 80)
