@@ -3,16 +3,13 @@ from sys import exit
 
 import polars as pl
 
-from classes.cc.amex import AmexAnnualStatement, AmexStatement
-from classes.cc.bmo import BMOStatement
-from classes.cc.cibc_mc import CibcMcStatement
-from classes.cc.rbc_cc import RbcCcStatement
-from classes.cc.rogers import RogersStatement
-from classes.cc.simplii_debit import SimpliiDebitStatement
-from classes.cc.simplii_visa import SimpliiVisaStatement
-from classes.cc.td_visa import TdVisaStatement
-from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
-from classes.cc.wealthsimple_debit import WealthsimpleDebitStatement
+from classes.cc.card_registry import (
+    get_card_class,
+    get_card_type_names,
+    get_file_based_card_types,
+    get_online_card_types,
+    requires_file,
+)
 from classes.db.generics.finance_db import FinanceDB
 from classes.db.my_finance_db import MyFinanceDB
 from classes.db.parents_finance_db import ParentsFinanceDB
@@ -24,7 +21,7 @@ def load_card_statement_df(card_type: str, file_path: str = None) -> pl.DataFram
 
     Args:
         card_type: Type of credit card
-        file_path: Path to the transaction data file (not needed for ws_debit/ws_credit)
+        file_path: Path to the transaction data file (not needed for online card types)
 
     Returns:
         pl.DataFrame: Loaded transaction data
@@ -32,32 +29,153 @@ def load_card_statement_df(card_type: str, file_path: str = None) -> pl.DataFram
     Raises:
         ValueError: If invalid card type or missing file path
     """
-    if card_type == "amex":
-        return AmexStatement(file_path=file_path).get_df()
-    elif card_type == "amex_annual":
-        return AmexAnnualStatement(file_path=file_path).get_df()
-    elif card_type == "rogers":
-        return RogersStatement(file_path=file_path).get_df()
-    elif card_type == "simplii_visa":
-        return SimpliiVisaStatement(file_path=file_path).get_df()
-    elif card_type == "simplii_debit":
-        return SimpliiDebitStatement(file_path=file_path).get_df()
-    elif card_type == "bmo":
-        return BMOStatement(file_path=file_path).get_df()
-    elif card_type == "cibc_mc":
-        return CibcMcStatement(file_path=file_path).get_df()
-    elif card_type == "rbc_cc":
-        return RbcCcStatement(file_path=file_path).get_df()
-    elif card_type == "td_visa":
-        return TdVisaStatement(file_path=file_path).get_df()
-    elif card_type == "ws_debit":
-        return WealthsimpleDebitStatement().get_df()
-    elif card_type == "ws_credit":
-        return WealthsimpleCreditStatement().get_df()
+    # Get the appropriate statement class from the registry
+    statement_class = get_card_class(card_type)
+
+    # Instantiate and load data based on whether file is required
+    if requires_file(card_type):
+        return statement_class(file_path=file_path).get_df()
+    else:
+        return statement_class().get_df()
+
+
+def validate_arguments(card_type: str, file_path: str, folder_path: str) -> None:
+    """
+    Validate argument combinations for card type and file inputs.
+
+    Args:
+        card_type: The credit card type
+        file_path: Path to single file (or None)
+        folder_path: Path to folder (or None)
+
+    Raises:
+        ValueError: If argument combination is invalid
+    """
+    # Validate that --filepath and --folder are mutually exclusive
+    if file_path and folder_path:
+        raise ValueError(
+            "Cannot provide both --filepath and --folder. Please provide only one."
+        )
+
+    online_types = get_online_card_types()
+    file_based_types = get_file_based_card_types()
+
+    if card_type in online_types:
+        if file_path or folder_path:
+            raise ValueError(
+                f"{card_type} doesn't use csv files, no need to provide --filepath or --folder"
+            )
+    elif card_type in file_based_types:
+        if not file_path and not folder_path:
+            raise ValueError(
+                f"Please provide either --filepath or --folder for {card_type} transactions"
+            )
+
+
+def build_file_list(card_type: str, file_path: str, folder_path: str) -> list[str]:
+    """
+    Build list of files to process based on arguments.
+
+    Args:
+        card_type: The credit card type
+        file_path: Path to single file (or None)
+        folder_path: Path to folder (or None)
+
+    Returns:
+        List of file paths to process (or [None] for online card types)
+
+    Raises:
+        ValueError: If folder doesn't exist or is empty
+    """
+    online_types = get_online_card_types()
+
+    if card_type in online_types:
+        # Online cards don't use files, process once with no file
+        return [None]
+    elif folder_path:
+        # Validate folder exists
+        if not os.path.isdir(folder_path):
+            raise ValueError(f"Folder does not exist: {folder_path}")
+
+        # Get all files in the folder
+        all_files = [
+            os.path.join(folder_path, f)
+            for f in os.listdir(folder_path)
+            if os.path.isfile(os.path.join(folder_path, f))
+        ]
+
+        if not all_files:
+            raise ValueError(f"Folder is empty: {folder_path}")
+
+        print(f"Found {len(all_files)} files in folder: {folder_path}")
+        return all_files
+    elif file_path:
+        return [file_path]
+    else:
+        return []
+
+
+def get_database_instance(database_name: str) -> FinanceDB:
+    """
+    Get database instance based on database name.
+
+    Args:
+        database_name: Name of the database ('finance' or 'parents_finance')
+
+    Returns:
+        Database instance
+
+    Raises:
+        ValueError: If database name is invalid
+    """
+    if database_name == "finance":
+        return MyFinanceDB(debug=True)
+    elif database_name == "parents_finance":
+        return ParentsFinanceDB(debug=True)
     else:
         raise ValueError(
-            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'cibc_mc' or 'rbc_cc' or 'td_visa' or 'ws_debit' or 'ws_credit' or 'amex_annual'."
+            f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'."
         )
+
+
+def print_processing_summary(
+    results: list[dict], failed_files: list[dict], total_files: int
+) -> None:
+    """
+    Print summary of processing results.
+
+    Args:
+        results: List of result dictionaries for each file
+        failed_files: List of failed file dictionaries
+        total_files: Total number of files processed
+    """
+    print("\n" + "=" * 80)
+    print("PROCESSING SUMMARY")
+    print("=" * 80)
+
+    if results:
+        print("\nPer-file breakdown:")
+        for result in results:
+            if result["status"] == "success":
+                print(
+                    f"  ✓ {result['file']}: {result['inserted']}/{result['total']} transactions inserted"
+                )
+            else:
+                print(f"  ✗ {result['file']}: FAILED")
+
+    if failed_files:
+        print(f"\n{len(failed_files)} file(s) failed to process:")
+        for failed in failed_files:
+            print(f"  - {failed['file']}: {failed['error']}")
+
+    total_inserted = sum(r["inserted"] for r in results)
+    total_transactions = sum(r["total"] for r in results)
+    successful_files = sum(1 for r in results if r["status"] == "success")
+
+    print(
+        f"\nTotal: {total_inserted}/{total_transactions} transactions inserted from {successful_files}/{total_files} file(s)"
+    )
+    print("=" * 80)
 
 
 def insert_df_to_postgres(
@@ -104,10 +222,14 @@ def insert_df_to_postgres(
 if __name__ == "__main__":
     import argparse
 
+    # Get supported card types from registry
+    supported_card_types = get_card_type_names()
+    card_types_str = ", ".join(supported_card_types)
+
     # Set up argument parser
     parser = argparse.ArgumentParser(
         description="Load credit card data into PostgreSQL database",
-        epilog="""
+        epilog=f"""
 Usage Examples:
 
   Single file:
@@ -120,25 +242,13 @@ Usage Examples:
     python load-cc-transactions.py --type ws_debit --database finance
 
 Supported card types:
-  amex, amex_annual, rogers, simplii_visa, simplii_debit, bmo, cibc_mc, rbc_cc, td_visa, ws_debit, ws_credit
+  {card_types_str}
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--type",
-        choices=[
-            "amex",
-            "amex_annual",
-            "rogers",
-            "simplii_visa",
-            "simplii_debit",
-            "bmo",
-            "cibc_mc",
-            "rbc_cc",
-            "td_visa",
-            "ws_debit",
-            "ws_credit",
-        ],
+        choices=supported_card_types,
         required=True,
         help="Type of credit card data to process",
     )
@@ -157,97 +267,31 @@ Supported card types:
         help="Name of the database to use (finance or parents_finance)",
     )
 
-    # Parse arguments and check if any are missing
+    # Parse arguments
     args = parser.parse_args()
 
-    # If any required args are missing, parser.parse_args() will exit automatically
-    # with the help message, but we'll handle any other issues
     try:
+        # Extract arguments
         card_type = args.type
         file_path = args.filepath
         folder_path = args.folder
+        database_name = args.database
 
-        # Validate that --filepath and --folder are mutually exclusive
-        if file_path and folder_path:
-            raise ValueError(
-                "Cannot provide both --filepath and --folder. Please provide only one."
-            )
-
-        if card_type in {"ws_debit", "ws_credit"}:
-            if file_path or folder_path:
-                print(
-                    "Wealthsimple doesn't use csv files, no need to provide --filepath or --folder"
-                )
-                parser.print_help()
-                exit(1)
-
-        elif card_type in {
-            "amex",
-            "amex_annual",
-            "rogers",
-            "simplii_visa",
-            "simplii_debit",
-            "bmo",
-            "cibc_mc",
-            "rbc_cc",
-            "td_visa",
-        }:
-            if not file_path and not folder_path:
-                print(
-                    f"Please provide either --filepath or --folder for {card_type} transactions"
-                )
-                parser.print_help()
-                exit(1)
-
-        else:
-            print(f"Unknown card type: {card_type}")
-            parser.print_help()
-            exit(1)
+        # Validate argument combinations
+        validate_arguments(card_type, file_path, folder_path)
 
         # Build list of files to process
-        files_to_process = []
-        if card_type in {"ws_debit", "ws_credit"}:
-            # Wealthsimple cards don't use files, process once with no file
-            files_to_process = [None]
-        elif folder_path:
-            # Validate folder exists
-            if not os.path.isdir(folder_path):
-                raise ValueError(f"Folder does not exist: {folder_path}")
+        files_to_process = build_file_list(card_type, file_path, folder_path)
 
-            # Get all files in the folder
-            all_files = [
-                os.path.join(folder_path, f)
-                for f in os.listdir(folder_path)
-                if os.path.isfile(os.path.join(folder_path, f))
-            ]
-
-            if not all_files:
-                raise ValueError(f"Folder is empty: {folder_path}")
-
-            files_to_process = all_files
-            print(f"Found {len(files_to_process)} files in folder: {folder_path}")
-        elif file_path:
-            files_to_process = [file_path]
-
-        database_name = args.database
+        # Load database
+        print("Loading database...")
+        finance_db = get_database_instance(database_name)
+        print("Database loaded\n")
 
     except Exception as e:
         print(f"ERROR: {e}")
         parser.print_help()
         exit(1)
-
-    # Load database
-    print("Loading database...")
-    if database_name == "finance":
-        finance_db = MyFinanceDB(debug=True)
-    elif database_name == "parents_finance":
-        finance_db = ParentsFinanceDB(debug=True)
-    else:
-        print(
-            f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'."
-        )
-        exit()
-    print("Database loaded\n")
 
     # Track results per file
     results = []
@@ -315,30 +359,4 @@ Supported card types:
             continue
 
     # Print summary
-    print("\n" + "=" * 80)
-    print("PROCESSING SUMMARY")
-    print("=" * 80)
-
-    if results:
-        print("\nPer-file breakdown:")
-        for result in results:
-            if result["status"] == "success":
-                print(
-                    f"  ✓ {result['file']}: {result['inserted']}/{result['total']} transactions inserted"
-                )
-            else:
-                print(f"  ✗ {result['file']}: FAILED")
-
-    if failed_files:
-        print(f"\n{len(failed_files)} file(s) failed to process:")
-        for failed in failed_files:
-            print(f"  - {failed['file']}: {failed['error']}")
-
-    total_inserted = sum(r["inserted"] for r in results)
-    total_transactions = sum(r["total"] for r in results)
-    successful_files = sum(1 for r in results if r["status"] == "success")
-
-    print(
-        f"\nTotal: {total_inserted}/{total_transactions} transactions inserted from {successful_files}/{len(files_to_process)} file(s)"
-    )
-    print("=" * 80)
+    print_processing_summary(results, failed_files, len(files_to_process))
