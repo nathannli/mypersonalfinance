@@ -4,39 +4,15 @@ from sys import exit
 import polars as pl
 
 from classes.cc.card_registry import (
-    get_card_class,
     get_card_type_names,
     get_file_based_card_types,
     get_online_card_types,
-    requires_file,
 )
 from classes.db.generics.finance_db import FinanceDB
 from classes.db.my_finance_db import MyFinanceDB
 from classes.db.parents_finance_db import ParentsFinanceDB
-
-
-def load_card_statement_df(card_type: str, file_path: str = None) -> pl.DataFrame:
-    """
-    Load credit card statement data based on card type.
-
-    Args:
-        card_type: Type of credit card
-        file_path: Path to the transaction data file (not needed for online card types)
-
-    Returns:
-        pl.DataFrame: Loaded transaction data
-
-    Raises:
-        ValueError: If invalid card type or missing file path
-    """
-    # Get the appropriate statement class from the registry
-    statement_class = get_card_class(card_type)
-
-    # Instantiate and load data based on whether file is required
-    if requires_file(card_type):
-        return statement_class(file_path=file_path).get_df()
-    else:
-        return statement_class().get_df()
+from services.transaction_loader import TransactionLoader
+from utils.processing_results import ProcessingResults
 
 
 def validate_arguments(card_type: str, file_path: str, folder_path: str) -> None:
@@ -136,46 +112,6 @@ def get_database_instance(database_name: str) -> FinanceDB:
         raise ValueError(
             f"Invalid database name: {database_name}. Please choose from 'finance' or 'parents_finance'."
         )
-
-
-def print_processing_summary(
-    results: list[dict], failed_files: list[dict], total_files: int
-) -> None:
-    """
-    Print summary of processing results.
-
-    Args:
-        results: List of result dictionaries for each file
-        failed_files: List of failed file dictionaries
-        total_files: Total number of files processed
-    """
-    print("\n" + "=" * 80)
-    print("PROCESSING SUMMARY")
-    print("=" * 80)
-
-    if results:
-        print("\nPer-file breakdown:")
-        for result in results:
-            if result["status"] == "success":
-                print(
-                    f"  ✓ {result['file']}: {result['inserted']}/{result['total']} transactions inserted"
-                )
-            else:
-                print(f"  ✗ {result['file']}: FAILED")
-
-    if failed_files:
-        print(f"\n{len(failed_files)} file(s) failed to process:")
-        for failed in failed_files:
-            print(f"  - {failed['file']}: {failed['error']}")
-
-    total_inserted = sum(r["inserted"] for r in results)
-    total_transactions = sum(r["total"] for r in results)
-    successful_files = sum(1 for r in results if r["status"] == "success")
-
-    print(
-        f"\nTotal: {total_inserted}/{total_transactions} transactions inserted from {successful_files}/{total_files} file(s)"
-    )
-    print("=" * 80)
 
 
 def insert_df_to_postgres(
@@ -293,13 +229,13 @@ Supported card types:
         parser.print_help()
         exit(1)
 
-    # Track results per file
-    results = []
-    failed_files = []
+    # Initialize transaction loader and results tracker
+    loader = TransactionLoader()
+    results = ProcessingResults()
 
     # Process each file
     for idx, current_file_path in enumerate(files_to_process, 1):
-        # Handle ws_debit/ws_credit which don't use files
+        # Handle online card types which don't use files
         if current_file_path is None:
             file_name = f"{card_type} (online)"
         else:
@@ -318,7 +254,8 @@ Supported card types:
                 print(f"Loading {card_type} data from online source")
             else:
                 print(f"Loading {card_type} data from {current_file_path}")
-            df = load_card_statement_df(card_type, current_file_path)
+
+            df = loader.load(card_type, current_file_path)
             print("Data loaded")
 
             # Check if the DataFrame has any rows before inserting
@@ -327,36 +264,19 @@ Supported card types:
                     inserted_rows = insert_df_to_postgres(
                         df=df, finance_db=finance_db, card_type=card_type
                     )
-                    results.append(
-                        {
-                            "file": file_name,
-                            "status": "success",
-                            "inserted": inserted_rows,
-                            "total": df.height,
-                        }
-                    )
+                    results.add_success(file_name, inserted_rows, df.height)
                 except KeyboardInterrupt:
                     print("Keyboard interrupt")
                     exit()
             else:
                 print("No data to process in the file")
-                results.append(
-                    {
-                        "file": file_name,
-                        "status": "success",
-                        "inserted": 0,
-                        "total": 0,
-                    }
-                )
+                results.add_success(file_name, 0, 0)
 
         except Exception as e:
             print(f"ERROR processing file {file_name}: {e}")
-            failed_files.append({"file": file_name, "error": str(e)})
-            results.append(
-                {"file": file_name, "status": "failed", "inserted": 0, "total": 0}
-            )
+            results.add_failure(file_name, str(e))
             # Continue processing remaining files
             continue
 
     # Print summary
-    print_processing_summary(results, failed_files, len(files_to_process))
+    results.print_summary(len(files_to_process))
