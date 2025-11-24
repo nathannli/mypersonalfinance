@@ -5,10 +5,12 @@ import polars as pl
 
 from classes.cc.amex import AmexAnnualStatement, AmexStatement
 from classes.cc.bmo import BMOStatement
+from classes.cc.cibc_mc import CibcMcStatement
 from classes.cc.rbc_cc import RbcCcStatement
 from classes.cc.rogers import RogersStatement
 from classes.cc.simplii_debit import SimpliiDebitStatement
 from classes.cc.simplii_visa import SimpliiVisaStatement
+from classes.cc.td_visa import TdVisaStatement
 from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
 from classes.cc.wealthsimple_debit import WealthsimpleDebitStatement
 from classes.db.generics.finance_db import FinanceDB
@@ -40,7 +42,9 @@ def extract_card_type_from_filename(file_path: str) -> str:
         "simplii_visa",
         "simplii_debit",
         "bmo",
+        "cibc_mc",
         "rbc_cc",
+        "td_visa",
         "ws_debit",
         "ws_credit",
     ]
@@ -118,7 +122,9 @@ if __name__ == "__main__":
             "simplii_visa",
             "simplii_debit",
             "bmo",
+            "cibc_mc",
             "rbc_cc",
+            "td_visa",
             "ws_debit",
             "ws_credit",
         ],
@@ -167,7 +173,9 @@ if __name__ == "__main__":
             "simplii_visa",
             "simplii_debit",
             "bmo",
+            "cibc_mc",
             "rbc_cc",
+            "td_visa",
         }:
             if not file_path:
                 print(f"Please provide --filepath for {card_type} transactions")
@@ -200,15 +208,19 @@ if __name__ == "__main__":
         df = SimpliiDebitStatement(file_path=file_path).get_df()
     elif card_type == "bmo":
         df = BMOStatement(file_path=file_path).get_df()
+    elif card_type == "cibc_mc":
+        df = CibcMcStatement(file_path=file_path).get_df()
     elif card_type == "rbc_cc":
         df = RbcCcStatement(file_path=file_path).get_df()
+    elif card_type == "td_visa":
+        df = TdVisaStatement(file_path=file_path).get_df()
     elif card_type == "ws_debit":
         df = WealthsimpleDebitStatement().get_df()
     elif card_type == "ws_credit":
         df = WealthsimpleCreditStatement().get_df()
     else:
         print(
-            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'rbc_cc' or 'ws_debit' or 'ws_credit' or 'amex_annual'."
+            f"Invalid card type: {card_type}. Please choose from 'amex' or 'rogers' or 'simplii_visa' or 'simplii_debit' or 'bmo' or 'cibc_mc' or 'rbc_cc' or 'td_visa' or 'ws_debit' or 'ws_credit' or 'amex_annual'."
         )
         exit()
     print("df loaded")
