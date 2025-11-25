@@ -48,21 +48,28 @@ class TdVisaStatement(FileBasedCardStatement):
         df2 = df1.with_columns(pl.col("date").str.to_date(format="%m/%d/%Y"))
 
         # Filter out payments (they appear in the credit column with "PAYMENT" in merchant)
-        df3 = df2.filter(~(pl.col("merchant").str.contains("PAYMENT")))
+        df3 = df2.filter(
+            ~(pl.col("merchant").str.contains("PAYMENT"))
+            & ~(pl.col("merchant").str.contains("REWARDS REDEMPTION"))
+        )
 
         # turn the credit column to negative
         df4 = df3.with_columns(pl.col("credit").cast(pl.Float64).neg())
 
         # coalesce cost and credit to a single column
         df5 = df4.with_columns(
-            pl.col("cost").cast(pl.Float64)
-            + pl.col("credit").cast(pl.Float64).alias("cost")
+            pl.coalesce(
+                pl.col("cost").cast(pl.Float64), pl.col("credit").cast(pl.Float64)
+            ).alias("new_cost")
         )
 
         # Add cc_category as None
-        df5 = df4.with_columns(pl.lit(None).alias("cc_category"))
+        df6 = df5.with_columns(pl.lit(None).alias("cc_category"))
 
         # Select only the columns we need
-        df6 = df5.select(["date", "merchant", "cost", "cc_category"])
+        df7 = df6.select(["date", "merchant", "new_cost", "cc_category"])
 
-        self.df = df6
+        # rename
+        df8 = df7.rename({"new_cost": "cost"})
+
+        self.df = df8

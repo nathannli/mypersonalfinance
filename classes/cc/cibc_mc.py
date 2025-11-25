@@ -36,11 +36,11 @@ class CibcMcStatement(FileBasedCardStatement):
         # Rename columns to normalized names
         df1 = df.rename(
             {
-                "column_0": "date",
-                "column_1": "merchant",
-                "column_2": "cost",
-                "column_3": "credit",
-                "column_4": "card_number",
+                "column_1": "date",
+                "column_2": "merchant",
+                "column_3": "cost",
+                "column_4": "credit",
+                "column_5": "card_number",
             }
         )
 

@@ -7,6 +7,7 @@ eliminating the need to update multiple locations when adding new card types.
 
 from classes.cc.amex import AmexAnnualStatement, AmexStatement
 from classes.cc.bmo import BMOStatement
+from classes.cc.canadian_tire import CanadianTireStatement
 from classes.cc.cibc_mc import CibcMcStatement
 from classes.cc.rbc_cc import RbcCcStatement
 from classes.cc.rogers import RogersStatement
@@ -47,6 +48,11 @@ CARD_TYPES = {
         "class": BMOStatement,
         "requires_file": True,
         "description": "BMO",
+    },
+    "canadian_tire": {
+        "class": CanadianTireStatement,
+        "requires_file": True,
+        "description": "Canadian Tire",
     },
     "cibc_mc": {
         "class": CibcMcStatement,
