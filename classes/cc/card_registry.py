@@ -13,6 +13,7 @@ from classes.cc.rbc_cc import RbcCcStatement
 from classes.cc.rogers import RogersStatement
 from classes.cc.simplii_debit import SimpliiDebitStatement
 from classes.cc.simplii_visa import SimpliiVisaStatement
+from classes.cc.td_debit import TdDebitStatement
 from classes.cc.td_visa import TdVisaStatement
 from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
 from classes.cc.wealthsimple_debit import WealthsimpleDebitStatement
@@ -63,6 +64,11 @@ CARD_TYPES = {
         "class": RbcCcStatement,
         "requires_file": True,
         "description": "RBC Credit Card",
+    },
+    "td_debit": {
+        "class": TdDebitStatement,
+        "requires_file": True,
+        "description": "TD Debit",
     },
     "td_visa": {
         "class": TdVisaStatement,
