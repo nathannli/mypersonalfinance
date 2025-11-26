@@ -48,11 +48,17 @@ class ParentsFinanceDB(FinanceDB):
             return None
 
     def insert_expense(
-        self, date: date, merchant: str, cost: float, cc_category: str | None = None
+        self,
+        date: date,
+        merchant: str,
+        cost: float,
+        card_type: str = "",
+        cc_category: str | None = None,
     ) -> int:
         """
         Insert an expense into the database.
         Ask the user to select a category for the expense.
+        # card type does nothing, its just to make the function signature match the other functions
         """
         print(f"Transaction on {date} at {merchant} for {cost}")
 

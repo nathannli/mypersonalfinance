@@ -37,28 +37,33 @@ class CanadianTireStatement(FileBasedCardStatement):
             )
 
         # Filter rows after the header row and drop unnecessary columns
+        df1 = df.with_row_index().filter(pl.col("index") > header_row)
+
         df1 = (
             df.with_row_index()
             .filter(pl.col("index") > header_row)
-            .drop("index", "REF", "POSTED DATE", "TYPE", "Category")
+            .drop("index", "column_3")
         )
 
+        # Filter out rows whose type is payment
+        df2 = df1.filter(pl.col("column_4") != "PAYMENT")
+
         # Rename columns to more normalized names
-        df2 = df1.rename(
+        df3 = df2.rename(
             {
-                "TRANSACTION DATE": "date",
-                "DESCRIPTION": "merchant",
-                "AMOUNT": "cost",
+                "column_2": "date",
+                "column_5": "merchant",
+                "column_7": "cost",
             }
         )
 
         # Convert date strings to date objects
-        df3 = df2.with_columns(pl.col("date").str.to_date(format="%d-%m-%Y"))
+        df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
 
         # Convert cost strings to decimal numbers
-        df4 = df3.with_columns(pl.col("cost").str.to_decimal())
+        df5 = df4.with_columns(pl.col("cost").str.to_decimal())
 
-        # Filter out rows where cost is negative (we only want expenses)
-        df5 = df4.filter(pl.col("cost") > 0)
+        # add cc_category as None
+        df6 = df5.with_columns(pl.lit(None).alias("cc_category"))
 
-        self.df = df5
+        self.df = df6
