@@ -17,7 +17,7 @@ class ParentsFinanceDB(FinanceDB):
         """
         Get all categories.
         """
-        query = "select id, name as category from categories"
+        query = "select id, name as category from categories order by category"
         return pl.DataFrame(
             self.select(query),
             schema={"id": pl.Int64, "category": pl.Utf8},
