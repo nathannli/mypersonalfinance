@@ -80,8 +80,7 @@ Supported card types:
         )
         parser.add_argument(
             "--database",
-            required=False,
-            default="finance",
+            required=True,
             help="Name of the database to use (finance or parents_finance)",
         )
 
