@@ -61,7 +61,7 @@ class CanadianTireStatement(FileBasedCardStatement):
         df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
 
         # Convert cost strings to decimal numbers
-        df5 = df4.with_columns(pl.col("cost").str.to_decimal())
+        df5 = df4.with_columns(pl.col("cost").str.to_decimal(scale=2))
 
         # add cc_category as None
         df6 = df5.with_columns(pl.lit(None).alias("cc_category"))

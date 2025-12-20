@@ -47,7 +47,7 @@ class RogersStatement(FileBasedCardStatement):
         df3 = df2.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
 
         # Convert cost strings to decimal numbers, removing dollar signs
-        df4 = df3.with_columns(pl.col("cost").str.replace(r"\$", "").str.to_decimal())
+        df4 = df3.with_columns(pl.col("cost").str.replace(r"\$", "").str.to_decimal(scale=2))
 
         # Filter out rows where cost is negative (we only want expenses)
         df5 = df4.filter(pl.col("cost") > 0)
