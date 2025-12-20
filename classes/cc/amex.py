@@ -76,7 +76,10 @@ class AmexStatement(FileBasedCardStatement):
 
         # Convert amount strings to decimal numbers, removing dollar signs and commas
         df5 = df4.with_columns(
-            pl.col("cost").str.replace(r"\$", "").str.replace(",", "").str.to_decimal(scale=2)
+            pl.col("cost")
+            .str.replace(r"\$", "")
+            .str.replace(",", "")
+            .str.to_decimal(scale=2)
         )
 
         # Filter out rows where merchant is "PAYMENT RECEIVED - THANK YOU"
@@ -109,8 +112,12 @@ class AmexAnnualStatement(FileBasedCardStatement):
         }
         df = pl.read_csv(source=self.file_path, has_header=True, schema=schema)
         df = df.with_columns(pl.col("Date").str.to_date(format="%d/%m/%Y"))
-        df = df.with_columns(pl.col("Charges $").str.replace(",", "").str.to_decimal(scale=2))
-        df = df.with_columns(pl.col("Credits $").str.replace(",", "").str.to_decimal(scale=2))
+        df = df.with_columns(
+            pl.col("Charges $").str.replace(",", "").str.to_decimal(scale=2)
+        )
+        df = df.with_columns(
+            pl.col("Credits $").str.replace(",", "").str.to_decimal(scale=2)
+        )
 
         # merge Charges $ and Credits $, but credits should be negative
         df = df.with_columns(pl.col("Credits $").mul(-1))
