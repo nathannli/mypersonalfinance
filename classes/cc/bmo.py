@@ -64,7 +64,7 @@ class BMOStatement(FileBasedCardStatement):
         df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y%m%d"))
 
         # Convert amount strings to decimal numbers, removing dollar signs and commas
-        df5 = df4.with_columns(pl.col("cost").str.to_decimal())
+        df5 = df4.with_columns(pl.col("cost").str.to_decimal(scale=2))
 
         # Filter out rows where cost is negative (we only want expenses)
         df6 = df5.filter(pl.col("cost") > 0)

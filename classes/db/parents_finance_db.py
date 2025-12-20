@@ -22,7 +22,7 @@ class ParentsFinanceDB(FinanceDB):
             self.select(query),
             schema={"id": pl.Int64, "category": pl.Utf8},
             orient="row",
-        )
+        ).sort("category")
 
     def get_category_name_from_id(self, category_id: int) -> str:
         """
