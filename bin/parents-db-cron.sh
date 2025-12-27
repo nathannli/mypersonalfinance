@@ -13,6 +13,7 @@ send_discord_notification() {
 NAS_IP=195.168.1.14
 NAS_USER=$PARENTS_FINANCE_FTP_USER
 NAS_PASSWORD=$PARENTS_FINANCE_FTP_PASS
+GIT_PATH="/home/nathan/git/mypersonalfinance"
 
 echo "NAS_IP: $NAS_IP"
 echo "NAS_USER: $NAS_USER"
@@ -35,7 +36,7 @@ failed_files=()
 
 for file in "${files_to_process[@]}"; do
     echo "Processing $file"
-    if ! python /home/nathan/github/mypersonalfinance/load-excel-transactions.py --filepath "$file" --cron true; then
+    if ! python $GIT_PATH/load-excel-transactions.py --filepath "$file" --cron true; then
         echo "ERROR: Failed to process $file"
         failed_files+=("$file")
     fi
