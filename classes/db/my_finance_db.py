@@ -42,13 +42,23 @@ class MyFinanceDB(FinanceDB):
         """
         Get all subcategories and categories.
         """
-        query = "select subcategories.id as subcategory_id, subcategories.name as subcategory, categories.name as category from subcategories join categories on subcategories.category_id = categories.id"
+        query = """
+        select 
+            subcategories.id as subcategory_id, 
+            subcategories.name as subcategory, 
+            categories.name as category 
+        from subcategories 
+            join categories on 
+                subcategories.category_id = categories.id
+        """
         schema = {
             "subcategory_id": pl.Int64,
             "subcategory": pl.Utf8,
             "category": pl.Utf8,
         }
-        return pl.DataFrame(self.select(query), schema=schema, orient="row")
+        return pl.DataFrame(self.select(query), schema=schema, orient="row").sort(
+            by=["category", "subcategory"]
+        )
 
     def check_if_reimbursement_expense_exists(self, date: date, merchant: str) -> bool:
         """
