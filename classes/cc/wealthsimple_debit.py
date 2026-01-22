@@ -51,7 +51,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                     (pl.col("type") == "Pre-authorized debit")
                     & (
                         pl.col("description").is_in(
-                            ["AMEX BILL PYMT", "Coinbase", "CDN TIRE"]
+                            ["AMEX BILL PYMT", "Coinbase", "CDN TIRE", "AMEX"]
                         )
                     )
                 )
