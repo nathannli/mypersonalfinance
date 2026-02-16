@@ -5,6 +5,10 @@ from classes.cc.generics.online_card_statement import OnlineCardStatement
 
 
 class WealthsimpleCreditStatement(OnlineCardStatement):
+    purchase = "Purchase"
+    refund = "Refund"
+    acceptable_types = [purchase, refund]
+
     def __init__(self):
         super().__init__(type="ws_credit")
 
@@ -36,7 +40,7 @@ class WealthsimpleCreditStatement(OnlineCardStatement):
             account_activity_url_suffix=self.config.ws_credit_link
         )
         df = pl.DataFrame(transactions)
-        df1 = df.filter(pl.col("type") == "Purchase")
+        df1 = df.filter(pl.col("type").is_in(self.acceptable_types))
 
         # merge description & type
         df2 = df1.with_columns(
@@ -64,7 +68,15 @@ class WealthsimpleCreditStatement(OnlineCardStatement):
             .cast(pl.Float64)
         )
 
-        df6 = df5.select(
+        # refund transaction types should have negative costs
+        df6 = df5.with_columns(
+            pl.when(pl.col("type") == self.refund)
+            .then(-pl.col("cost"))
+            .otherwise(pl.col("cost"))
+            .alias("cost")
+        )
+
+        df7 = df6.select(
             pl.col("date"),
             pl.col("merchant"),
             pl.col("cost"),
@@ -72,5 +84,5 @@ class WealthsimpleCreditStatement(OnlineCardStatement):
         )
         print("================================================")
         print("load data end from wealthsimple_credit.py")
-        print(f"{df6=}")
-        self.df = df6
+        print(f"{df7=}")
+        self.df = df7
