@@ -60,4 +60,4 @@ This file gives repository-specific guidance for coding agents working in this p
   - `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile <file.py>`
 
 ## database reference
-- you have access to the database via my custom function `mypg`. you can find the connection string in the .env file
+- you have select access only to the database via my custom function `aipg`. it defaults to the finance database
