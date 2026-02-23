@@ -76,6 +76,7 @@ class TdDebitStatement(FileBasedCardStatement):
             "ROGRS BNK MC",
             "CAN TIRE MC",
             "CIBC MC",
+            "EMPL INS         EI",
         ]
 
         # Filter out transactions from skip list
