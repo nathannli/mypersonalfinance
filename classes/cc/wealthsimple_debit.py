@@ -133,4 +133,8 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
             pl.col("cc_category"),
         )
 
+        print("================================================")
+        print("load data end from wealthsimple_debit.py")
+        print(f"{df9=}")
+
         self.df = df9
