@@ -1,9 +1,0 @@
-polars
-SQLAlchemy
-psycopg-binary
-psycopg
-fastexcel
-pandas
-python-dotenv
-pre-commit
-requests

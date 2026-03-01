@@ -10,11 +10,18 @@ This file gives repository-specific guidance for coding agents working in this p
 ## Project Overview
 
 - This repo loads and categorizes financial transactions into PostgreSQL databases.
+- The repo now uses `uv` with `pyproject.toml` for dependency management.
 - Primary entry point for card/file ingestion: `load-transactions.py` (CLI/service flow).
 - Primary Excel ingestion entry point: `load-excel-transactions.py`.
 - Two databases are used:
   - `finance`
   - `parents_finance`
+
+## Setup
+
+- Install dependencies with `uv sync --group dev`.
+- Install hooks with `uv run pre-commit install`.
+- Wealthsimple commands require `uv sync --extra wealthsimple`, which resolves `wealthsimpleton` from the local `../Wealthsimpleton` checkout.
 
 ## Transaction Loading Flow (Current)
 
@@ -58,6 +65,7 @@ This file gives repository-specific guidance for coding agents working in this p
 
 - Quick syntax check (sandbox-safe):
   - `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile <file.py>`
+- Run repo tooling with `uv run ...`, e.g. `uv run pre-commit run --all-files`.
 
 ## database reference
 - you have select access only to the database via my custom function `aipg`. it defaults to the finance database

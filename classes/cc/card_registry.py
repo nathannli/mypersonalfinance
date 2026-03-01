@@ -5,83 +5,85 @@ This module provides a single source of truth for card type definitions,
 eliminating the need to update multiple locations when adding new card types.
 """
 
-from classes.cc.amex import AmexAnnualStatement, AmexStatement
-from classes.cc.bmo import BMOStatement
-from classes.cc.canadian_tire import CanadianTireStatement
-from classes.cc.cibc_mc import CibcMcStatement
-from classes.cc.rbc_cc import RbcCcStatement
-from classes.cc.rogers import RogersStatement
-from classes.cc.simplii_debit import SimpliiDebitStatement
-from classes.cc.simplii_visa import SimpliiVisaStatement
-from classes.cc.td_debit import TdDebitStatement
-from classes.cc.td_visa import TdVisaStatement
-from classes.cc.wealthsimple_credit import WealthsimpleCreditStatement
-from classes.cc.wealthsimple_debit import WealthsimpleDebitStatement
+from importlib import import_module
 
 # Card type registry with metadata
 CARD_TYPES = {
     "amex": {
-        "class": AmexStatement,
+        "module": "classes.cc.amex",
+        "class_name": "AmexStatement",
         "requires_file": True,
         "description": "American Express",
     },
     "amex_annual": {
-        "class": AmexAnnualStatement,
+        "module": "classes.cc.amex",
+        "class_name": "AmexAnnualStatement",
         "requires_file": True,
         "description": "American Express Annual",
     },
     "rogers": {
-        "class": RogersStatement,
+        "module": "classes.cc.rogers",
+        "class_name": "RogersStatement",
         "requires_file": True,
         "description": "Rogers Mastercard",
     },
     "simplii_visa": {
-        "class": SimpliiVisaStatement,
+        "module": "classes.cc.simplii_visa",
+        "class_name": "SimpliiVisaStatement",
         "requires_file": True,
         "description": "Simplii Visa",
     },
     "simplii_debit": {
-        "class": SimpliiDebitStatement,
+        "module": "classes.cc.simplii_debit",
+        "class_name": "SimpliiDebitStatement",
         "requires_file": True,
         "description": "Simplii Debit",
     },
     "bmo": {
-        "class": BMOStatement,
+        "module": "classes.cc.bmo",
+        "class_name": "BMOStatement",
         "requires_file": True,
         "description": "BMO",
     },
     "canadian_tire": {
-        "class": CanadianTireStatement,
+        "module": "classes.cc.canadian_tire",
+        "class_name": "CanadianTireStatement",
         "requires_file": True,
         "description": "Canadian Tire",
     },
     "cibc_mc": {
-        "class": CibcMcStatement,
+        "module": "classes.cc.cibc_mc",
+        "class_name": "CibcMcStatement",
         "requires_file": True,
         "description": "CIBC Mastercard",
     },
     "rbc_cc": {
-        "class": RbcCcStatement,
+        "module": "classes.cc.rbc_cc",
+        "class_name": "RbcCcStatement",
         "requires_file": True,
         "description": "RBC Credit Card",
     },
     "td_debit": {
-        "class": TdDebitStatement,
+        "module": "classes.cc.td_debit",
+        "class_name": "TdDebitStatement",
         "requires_file": True,
         "description": "TD Debit",
     },
     "td_visa": {
-        "class": TdVisaStatement,
+        "module": "classes.cc.td_visa",
+        "class_name": "TdVisaStatement",
         "requires_file": True,
         "description": "TD Visa",
     },
     "ws_debit": {
-        "class": WealthsimpleDebitStatement,
+        "module": "classes.cc.wealthsimple_debit",
+        "class_name": "WealthsimpleDebitStatement",
         "requires_file": False,
         "description": "Wealthsimple Debit",
     },
     "ws_credit": {
-        "class": WealthsimpleCreditStatement,
+        "module": "classes.cc.wealthsimple_credit",
+        "class_name": "WealthsimpleCreditStatement",
         "requires_file": False,
         "description": "Wealthsimple Credit",
     },
@@ -121,7 +123,9 @@ def get_card_class(card_type: str):
         raise ValueError(
             f"Invalid card type: {card_type}. Valid types are: {valid_types}"
         )
-    return CARD_TYPES[card_type]["class"]
+    config = CARD_TYPES[card_type]
+    module = import_module(config["module"])
+    return getattr(module, config["class_name"])
 
 
 def requires_file(card_type: str) -> bool:

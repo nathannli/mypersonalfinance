@@ -25,23 +25,24 @@ A personal finance tracking system that loads credit card and bank transactions 
 
 2. Install dependencies:
    ```
-   pip install -r requirements.txt
-   pre-commit install
+   uv sync --group dev
+   uv run pre-commit install
    ```
 
 ### Loading Credit Card Transactions
 
 Load from CSV files:
-```
-python load-transactions.py --type <card_type> --filepath <path_to_csv> --database finance
+```bash
+uv run python load-transactions.py --type <card_type> --filepath <path_to_csv> --database finance
 ```
 
 Card types: `amex`, `amex_annual`, `rogers`, `simplii_visa`, `simplii_debit`, `bmo`, `rbc_cc`, `ws_debit`, `ws_credit`
 
 Load from online sources (no file needed):
-```
-python load-transactions.py --type ws_debit --database finance
-python load-transactions.py --type ws_credit --database finance
+```bash
+uv sync --extra wealthsimple
+uv run python load-transactions.py --type ws_debit --database finance
+uv run python load-transactions.py --type ws_credit --database finance
 ```
 
 If `--type` is omitted, it will be inferred from the filename.
@@ -49,26 +50,26 @@ If `--type` is omitted, it will be inferred from the filename.
 ### Loading Excel Transactions
 
 For pre-categorized Excel files:
-```
-python load-excel-transactions.py --filepath <path_to_excel>
+```bash
+uv run python load-excel-transactions.py --filepath <path_to_excel>
 ```
 
 For FTP sources (used by cron):
-```
-python load-excel-transactions.py --filepath ftp://user:pass@host/file.xlsx --cron true
+```bash
+uv run python load-excel-transactions.py --filepath ftp://user:pass@host/file.xlsx --cron true
 ```
 
 ### Code Quality
 
 Using ruff (via pre-commit):
-```
-pre-commit run --all-files
+```bash
+uv run pre-commit run --all-files
 ```
 
 Or manually:
-```
-ruff check --fix .
-ruff format .
+```bash
+uv run ruff check --fix .
+uv run ruff format .
 ```
 
 ## Architecture
@@ -126,5 +127,5 @@ Special handling for reimbursements: Checks for duplicate entries by (date, merc
 - All database operations use context managers for connection safety
 - Interactive categorization allows "skip" command to skip a transaction
 - Card type can be inferred from filename if it contains the card type keyword
-- Wealthsimple uses custom package (modified fork of Wealthsimpleton) for API access
+- Wealthsimple uses a custom local package (modified fork of Wealthsimpleton) for API access; `uv` resolves it from `../Wealthsimpleton` when you run `uv sync --extra wealthsimple`
 - Cron automation: Weekly cron job processes parents' transactions from FTP sources, with Discord notification integration
