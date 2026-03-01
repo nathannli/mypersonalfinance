@@ -35,6 +35,12 @@ class ParentsFinanceDB(FinanceDB):
         """
         Get the category id from the category name.
         """
+        if category_name is None:
+            return None
+
+        # Normalize whitespace from CSV exports (notably non-breaking spaces).
+        category_name = category_name.replace("\xa0", " ").strip()
+
         query = "select id from categories where lower(name) = lower(%s)"
         result = self.select(query, (category_name,))
         if len(result) == 1:
@@ -74,7 +80,8 @@ class ParentsFinanceDB(FinanceDB):
             category = self.get_auto_match_category(merchant)
             if category:
                 category_id = self.get_category_id_from_name(category)
-                found_match = True
+                if category_id is not None:
+                    found_match = True
 
         if category_id is None:
             if self.cron:
@@ -95,9 +102,15 @@ class ParentsFinanceDB(FinanceDB):
                         )
                 except ValueError:
                     print("Please enter a valid integer for category ID.")
-        # if category ignore is selected, then do not insert row in database
-        if not category_id == 22:
-            # insert the expense
+        # Skip inserts only when the resolved category is explicitly named "Ignore".
+        # Category IDs are database-specific and can drift, so hardcoding an ID (22)
+        # causes real categories (e.g. Utilities) to be skipped in parents_finance.
+        category_name = self.get_category_name_from_id(category_id)
+        if category_name.strip().lower() == "ignore":
+            print(
+                f"Skipping insert for {merchant}: category '{category_name}' is configured as ignore."
+            )
+        else:
             query = "insert into expenses (date, merchant, cost, category_id) values (%s, %s, %s, %s)"
             self.insert(query, (date, merchant, cost, category_id))
 

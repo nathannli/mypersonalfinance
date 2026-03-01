@@ -27,8 +27,13 @@ class RogersStatement(FileBasedCardStatement):
         Raises:
             Exception: If the file cannot be read or processed
         """
-        # Read the CSV file with headers
-        df = pl.read_csv(source=self.file_path, has_header=True)
+        # Keep oversized reference IDs as strings so schema inference doesn't fail on
+        # files that contain values larger than i64.
+        df = pl.read_csv(
+            source=self.file_path,
+            has_header=True,
+            schema_overrides={"Reference Number": pl.Utf8},
+        )
 
         # Rename columns to normalized names
         df1 = df.rename(
@@ -40,8 +45,13 @@ class RogersStatement(FileBasedCardStatement):
             }
         )
 
-        # Select only the columns we need
-        df2 = df1.select(["date", "merchant", "cost", "cc_category"])
+        # Select only the columns we need and normalize text fields. Rogers exports can
+        # include non-breaking spaces (e.g. trailing `\xa0`) that break DB category
+        # lookups and exact merchant matching.
+        df2 = df1.select(["date", "merchant", "cost", "cc_category"]).with_columns(
+            pl.col("merchant").str.replace_all("\u00a0", " ").str.strip_chars(),
+            pl.col("cc_category").str.replace_all("\u00a0", " ").str.strip_chars(),
+        )
 
         # Convert date strings to date objects
         df3 = df2.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
