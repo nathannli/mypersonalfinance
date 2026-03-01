@@ -11,7 +11,7 @@ This file gives repository-specific guidance for coding agents working in this p
 
 - This repo loads and categorizes financial transactions into PostgreSQL databases.
 - Primary entry point for card/file ingestion: `load-transactions.py` (CLI/service flow).
-- Legacy/parents Excel ingestion: `load-excel-transactions.py`.
+- Primary Excel ingestion entry point: `load-excel-transactions.py`.
 - Two databases are used:
   - `finance`
   - `parents_finance`

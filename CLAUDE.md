@@ -33,15 +33,15 @@ A personal finance tracking system that loads credit card and bank transactions 
 
 Load from CSV files:
 ```
-python load-cc-transactions.py --type <card_type> --filepath <path_to_csv> --database finance
+python load-transactions.py --type <card_type> --filepath <path_to_csv> --database finance
 ```
 
 Card types: `amex`, `amex_annual`, `rogers`, `simplii_visa`, `simplii_debit`, `bmo`, `rbc_cc`, `ws_debit`, `ws_credit`
 
 Load from online sources (no file needed):
 ```
-python load-cc-transactions.py --type ws_debit --database finance
-python load-cc-transactions.py --type ws_credit --database finance
+python load-transactions.py --type ws_debit --database finance
+python load-transactions.py --type ws_credit --database finance
 ```
 
 If `--type` is omitted, it will be inferred from the filename.
