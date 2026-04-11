@@ -5,17 +5,17 @@ This script loads credit card transaction data from various sources
 into a PostgreSQL database with automatic categorization.
 
 Usage:
-    python load-cc-transactions.py --type <card_type> [--filepath <file> | --folder <dir>] [--database <db>]
+    python load-transactions.py --type <card_type> [--filepath <file> | --folder <dir>] [--database <db>]
 
 Examples:
     # Single file
-    python load-cc-transactions.py --type cibc_mc --filepath statement.csv
+    python load-transactions.py --type cibc_mc --filepath statement.csv
 
     # Multiple files
-    python load-cc-transactions.py --type cibc_mc --folder statements/
+    python load-transactions.py --type cibc_mc --folder statements/
 
     # Online source
-    python load-cc-transactions.py --type ws_debit
+    python load-transactions.py --type ws_debit
 
 For more information, run with --help
 """

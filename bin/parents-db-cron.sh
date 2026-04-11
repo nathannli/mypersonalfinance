@@ -28,15 +28,11 @@ files_to_process=(
     "ftp://${NAS_USER}:${NAS_PASSWORD}@${NAS_IP}/1.2_FamilyExpenseSHARED/TDVisa6413_YTD2025.xlsx"
 )
 
-# Activate the virtual environment
-source /home/nathan/miniconda3/etc/profile.d/conda.sh
-conda activate finance
-
 failed_files=()
 
 for file in "${files_to_process[@]}"; do
     echo "Processing $file"
-    if ! python $GIT_PATH/load-excel-transactions.py --filepath "$file" --cron true; then
+    if ! uv run python "$GIT_PATH/load-excel-transactions.py" --filepath "$file" --cron true; then
         echo "ERROR: Failed to process $file"
         failed_files+=("$file")
     fi

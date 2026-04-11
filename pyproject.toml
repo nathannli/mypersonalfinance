@@ -1,0 +1,33 @@
+[project]
+name = "mypersonalfinance"
+version = "0.1.0"
+description = "Personal finance transaction loaders for PostgreSQL."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastexcel",
+    "numpy",
+    "polars",
+    "psycopg",
+    "psycopg-binary",
+    "python-dotenv",
+    "requests",
+    "sqlalchemy",
+]
+
+[project.optional-dependencies]
+wealthsimple = [
+    "wealthsimpleton",
+]
+
+[tool.uv.sources]
+wealthsimpleton = { path = "../Wealthsimpleton" }
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "ruff",
+]
+
+[tool.uv]
+package = false
