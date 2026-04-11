@@ -3,14 +3,14 @@
 # Function to send Discord notification
 send_discord_notification() {
     local message="$1"
-    curl -X POST http://localhost:30008/alert \
+    curl -X POST http://localhost:30007/alert \
         -H "Content-Type: application/json" \
         -d "{\"message\": \"$message\"}" \
         --silent --show-error
 }
 
 # Configurable variables
-NAS_IP=195.168.1.14
+NAS_IP=10.20.0.18
 NAS_USER=$PARENTS_FINANCE_FTP_USER
 NAS_PASSWORD=$PARENTS_FINANCE_FTP_PASS
 GIT_PATH="/home/nathan/git/mypersonalfinance"
