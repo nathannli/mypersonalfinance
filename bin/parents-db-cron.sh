@@ -30,14 +30,15 @@ files_to_process=(
 
 failed_files=()
 
+cd $GIT_PATH        
 for file in "${files_to_process[@]}"; do
     echo "Processing $file"
-    if ! uv run python "$GIT_PATH/load-excel-transactions.py" --filepath "$file" --cron true; then
+    if ! uv run python load-excel-transactions.py --filepath "$file" --cron true; then
         echo "ERROR: Failed to process $file"
         failed_files+=("$file")
-    fi
+    fi    
 done
-
+cd -
 # Send Discord notification if any files failed
 if [ ${#failed_files[@]} -gt 0 ]; then
     failed_list=$(printf '%s\n' "${failed_files[@]}")
