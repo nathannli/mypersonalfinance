@@ -92,6 +92,9 @@ class ParentsFinanceDB(FinanceDB):
             print(df)
             while True:
                 category_id = input("Enter the category id: ")
+                if category_id.strip().lower() == "skip":
+                    print("Skipping...")
+                    return 0
                 try:
                     category_id = int(category_id)
                     if category_id in df["id"].to_list():

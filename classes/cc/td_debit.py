@@ -77,6 +77,9 @@ class TdDebitStatement(FileBasedCardStatement):
             "CAN TIRE MC",
             "CIBC MC",
             "EMPL INS         EI",
+            "CPP              CPP",
+            "TAX REFUND       RIT",
+            "OLD AGE SEC      OAS",
         ]
 
         # Filter out transactions from skip list
