@@ -9,13 +9,13 @@ import argparse
 import os
 from sys import exit
 
-from classes.cc.card_registry import (
+from sources.registry import (
     get_card_type_names,
     get_file_based_card_types,
     get_online_card_types,
 )
-from classes.db.my_finance_db import MyFinanceDB
-from classes.db.parents_finance_db import ParentsFinanceDB
+from db.my_finance import MyFinanceDB
+from db.parents_finance import ParentsFinanceDB
 from services.transaction_loader import TransactionLoader
 from services.transaction_processor import TransactionProcessor
 

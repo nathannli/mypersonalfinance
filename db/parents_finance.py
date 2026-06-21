@@ -2,7 +2,7 @@ from datetime import date
 
 import polars as pl
 
-from classes.db.generics.finance_db import FinanceDB
+from db.finance_base import FinanceDB
 
 
 class ParentsFinanceDB(FinanceDB):

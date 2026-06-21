@@ -89,15 +89,15 @@ Core tables:
 
 ### Class Hierarchy
 
-**Database Classes** (`classes/db/`):
-- `PostgresDB` (abstract): Base database connection and query methods in `classes/db/generics/database.py`
-- `FinanceDB` (abstract): Finance-specific operations extending PostgresDB in `classes/db/generics/finance_db.py`
-- `MyFinanceDB`: Personal finance database implementation in `classes/db/my_finance_db.py`
-- `ParentsFinanceDB`: Parents' finance database implementation in `classes/db/parents_finance_db.py`
+**Database Classes** (`db/`):
+- `PostgresDB` (abstract): Base database connection and query methods in `db/base.py`
+- `FinanceDB` (abstract): Finance-specific operations extending PostgresDB in `db/finance_base.py`
+- `MyFinanceDB`: Personal finance database implementation in `db/my_finance.py`
+- `ParentsFinanceDB`: Parents' finance database implementation in `db/parents_finance.py`
 
-**Credit Card Statement Classes** (`classes/cc/`):
-- `FileBasedCardStatement` (abstract): For CSV-based statements in `classes/cc/generics/file_based_card_statement.py`
-- `OnlineCardStatement` (abstract): For API/link-based statements in `classes/cc/generics/online_card_statement.py`
+**Transaction Source Classes** (`sources/`):
+- `FileBasedCardStatement` (abstract): For CSV-based statements in `sources/base.py`
+- `OnlineCardStatement` (abstract): For API/link-based statements in `sources/base.py`
 - Card-specific implementations: `AmexStatement`, `AmexAnnualStatement`, `RogersStatement`, `SimpliiVisaStatement`, `SimpliiDebitStatement`, `BMOStatement`, `RbcCcStatement`, `WealthsimpleDebitStatement`, `WealthsimpleCreditStatement`
 
 All card statement classes must implement `load_data()` and return a Polars DataFrame with columns: `date`, `merchant`, `cost`, `cc_category`

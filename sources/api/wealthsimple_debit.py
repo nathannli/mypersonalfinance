@@ -1,6 +1,6 @@
 import polars as pl
 
-from classes.cc.generics.online_card_statement import OnlineCardStatement
+from sources.base import OnlineCardStatement
 from wealthsimpleton import wealthsimpleton as ws
 
 

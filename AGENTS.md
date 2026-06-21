@@ -25,14 +25,14 @@ This file gives repository-specific guidance for coding agents working in this p
 
 ## Transaction Loading Flow (Current)
 
-- CLI -> `services/transaction_loader.py` -> card statement class in `classes/cc/` -> standardized Polars DataFrame (`date`, `merchant`, `cost`, `cc_category`) -> `services/transaction_processor.py` -> DB `insert_expense(...)`.
+- CLI -> `services/transaction_loader.py` -> source class in `sources/` -> standardized Polars DataFrame (`date`, `merchant`, `cost`, `cc_category`) -> `services/transaction_processor.py` -> DB `insert_expense(...)`.
 - Duplicate detection is done before insertion via `check_if_expense_exists(date, merchant, cost)`.
 
 ## Important Code Paths
 
-- Rogers CSV parser: `/Users/nathan/data/personal/mypersonalfinance/classes/cc/rogers.py`
-- Parents DB insert logic: `/Users/nathan/data/personal/mypersonalfinance/classes/db/parents_finance_db.py`
-- Personal DB insert logic: `/Users/nathan/data/personal/mypersonalfinance/classes/db/my_finance_db.py`
+- Rogers CSV parser: `/Users/nathan/data/personal/mypersonalfinance/sources/rogers.py`
+- Parents DB insert logic: `/Users/nathan/data/personal/mypersonalfinance/db/parents_finance.py`
+- Personal DB insert logic: `/Users/nathan/data/personal/mypersonalfinance/db/my_finance.py`
 - Processing loop/counters: `/Users/nathan/data/personal/mypersonalfinance/services/transaction_processor.py`
 
 ## Known Pitfalls (Do Not Reintroduce)

@@ -1,7 +1,7 @@
 import polars as pl
 from wealthsimpleton import wealthsimpleton as ws
 
-from classes.cc.generics.online_card_statement import OnlineCardStatement
+from sources.base import OnlineCardStatement
 
 
 class WealthsimpleCreditStatement(OnlineCardStatement):

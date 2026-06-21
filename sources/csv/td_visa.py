@@ -1,6 +1,6 @@
 import polars as pl
 
-from classes.cc.generics.file_based_card_statement import FileBasedCardStatement
+from sources.base import FileBasedCardStatement
 
 
 class TdVisaStatement(FileBasedCardStatement):

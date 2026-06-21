@@ -2,7 +2,7 @@ from abc import abstractmethod
 from datetime import date
 from typing import Any
 
-from classes.db.generics.database import PostgresDB
+from db.base import PostgresDB
 
 
 class FinanceDB(PostgresDB):

@@ -1,23 +1,22 @@
 import polars as pl
 
-from classes.cc.generics.file_based_card_statement import FileBasedCardStatement
-from classes.cc.ref_data import simplii_visa_cc_merchant_name_to_category_ref
+from sources.base import FileBasedCardStatement
 
 
-class SimpliiVisaStatement(FileBasedCardStatement):
+class SimpliiDebitStatement(FileBasedCardStatement):
     def __init__(self, file_path: str):
-        super().__init__(type="simplii_visa", file_path=file_path)
+        super().__init__(type="simplii_debit", file_path=file_path)
 
     def load_data(self) -> None:
         """
-        Load and process Simplii Visa transaction data from a CSV file.
+        Load and process Simplii Debit transaction data from a CSV file.
 
-        This function reads a CSV file containing Simplii Visa transaction data, identifies
+        This function reads a CSV file containing Simplii Debit transaction data, identifies
         the header row, extracts relevant columns, and transforms the data into a
         standardized format for database insertion.
 
         Args:
-            file_path: Path to the CSV file containing Simplii Visa transaction data
+            file_path: Path to the CSV file containing Simplii Debit transaction data
 
         Returns:
             pl.DataFrame: Processed DataFrame with standardized column names and data types
@@ -34,6 +33,10 @@ class SimpliiVisaStatement(FileBasedCardStatement):
                 " Transaction Details": "merchant",
                 " Funds Out": "cost",
             }
+        ).select(
+            "date",
+            "merchant",
+            "cost",
         )
         # Add a dummy cc_category column with None values
         df3 = df2.with_columns(pl.lit(None).alias("cc_category"))
@@ -44,11 +47,18 @@ class SimpliiVisaStatement(FileBasedCardStatement):
         # Filter out rows where cost is null (we only want expenses)
         df6 = df4.filter(pl.col("cost").is_not_null())
 
-        self.df = df6
+        # Define list of merchants to skip
+        skip_merchants = [
+            "bill payment",
+            "MISCELLANEOUS PAYMENTS Wise Canada",
+            "INTERAC E-TRANSFER SEND nathan wealthsimple",
+        ]
 
-    @staticmethod
-    def auto_match_category() -> tuple[str, str]:
-        """
-        This is static because this card is only used for restaurants.
-        """
-        return simplii_visa_cc_merchant_name_to_category_ref["Restaurants"]
+        # filter out transactions from skip list
+        df7 = df6
+        for merchant in skip_merchants:
+            df7 = df7.filter(
+                ~(pl.col("merchant").str.to_lowercase().str.contains(merchant.lower()))
+            )
+
+        self.df = df7

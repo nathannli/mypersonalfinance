@@ -3,10 +3,10 @@ from datetime import date
 
 import polars as pl
 
-from classes.cc.ref_data import reimbursement_merchant_ref
-from classes.cc.rogers import RogersStatement
-from classes.cc.simplii_visa import SimpliiVisaStatement
-from classes.db.generics.finance_db import FinanceDB
+from sources.ref_data import reimbursement_merchant_ref
+from sources.csv.rogers import RogersStatement
+from sources.csv.simplii_visa import SimpliiVisaStatement
+from db.finance_base import FinanceDB
 
 
 class MyFinanceDB(FinanceDB):

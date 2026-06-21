@@ -3,7 +3,7 @@ from abc import ABC
 import polars as pl
 import psycopg
 
-from classes.config import Config
+from config import Config
 
 
 class PostgresDB(ABC):
