@@ -28,12 +28,40 @@ This file gives repository-specific guidance for coding agents working in this p
 - CLI -> `services/transaction_loader.py` -> source class in `sources/` -> standardized Polars DataFrame (`date`, `merchant`, `cost`, `cc_category`) -> `services/transaction_processor.py` -> DB `insert_expense(...)`.
 - Duplicate detection is done before insertion via `check_if_expense_exists(date, merchant, cost)`.
 
+## Project Structure
+
+```
+├── config.py              ← app config (.env loading)
+├── sources/
+│   ├── base.py            ← FileBasedCardStatement, OnlineCardStatement
+│   ├── registry.py        ← card type registry (dynamic imports)
+│   ├── ref_data.py        ← shared merchant→category reference maps
+│   ├── csv/               ← file-based CSV parsers (10 cards)
+│   │   ├── amex.py, bmo.py, canadian_tire.py, cibc_mc.py
+│   │   ├── rbc_cc.py, rogers.py, simplii_debit.py, simplii_visa.py
+│   │   └── td_debit.py, td_visa.py
+│   └── api/               ← online/API sources
+│       ├── wealthsimple_debit.py, wealthsimple_credit.py
+│       └── simplefin.py   ← (planned) SimplyFIN Bridge
+├── db/
+│   ├── base.py            ← PostgresDB (connection, query helpers)
+│   ├── finance_base.py    ← FinanceDB (categorization, insert logic)
+│   ├── my_finance.py      ← personal finance DB
+│   └── parents_finance.py ← parents' finance DB
+├── services/              ← TransactionLoader, TransactionProcessor
+├── cli/                   ← CLI argument handling
+└── utils/                 ← shared utilities
+```
+
 ## Important Code Paths
 
-- Rogers CSV parser: `/Users/nathan/data/personal/mypersonalfinance/sources/rogers.py`
-- Parents DB insert logic: `/Users/nathan/data/personal/mypersonalfinance/db/parents_finance.py`
-- Personal DB insert logic: `/Users/nathan/data/personal/mypersonalfinance/db/my_finance.py`
-- Processing loop/counters: `/Users/nathan/data/personal/mypersonalfinance/services/transaction_processor.py`
+- Card type registry: `sources/registry.py`
+- Base classes: `sources/base.py`
+- Rogers CSV parser: `sources/csv/rogers.py`
+- Wealthsimple API: `sources/api/wealthsimple_debit.py`
+- Parents DB insert: `db/parents_finance.py`
+- Personal DB insert: `db/my_finance.py`
+- Processing loop: `services/transaction_processor.py`
 
 ## Known Pitfalls (Do Not Reintroduce)
 
@@ -47,6 +75,7 @@ This file gives repository-specific guidance for coding agents working in this p
 
 ## Editing Guidance
 
+- New parsers go in `sources/csv/` (file-based) or `sources/api/` (online). Extend `FileBasedCardStatement` or `OnlineCardStatement` from `sources/base.py`, then register in `sources/registry.py`.
 - Preserve the standardized transaction DataFrame contract:
   - columns: `date`, `merchant`, `cost`, `cc_category`
 - When changing parsing logic, avoid broad schema inference reliance for CSVs with mixed/dirty exports.
