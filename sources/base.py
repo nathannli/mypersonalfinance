@@ -41,7 +41,7 @@ class OnlineCardStatement(ABC):
 
     def __init__(self, type: str):
         self.type = type
-        self.config = Config(debug=True)
+        self.config = Config()
         self.load_data()
 
     @abstractmethod
