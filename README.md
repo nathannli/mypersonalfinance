@@ -24,6 +24,13 @@ uv run python load-transactions.py --type ws_debit --database finance
 uv run python load-transactions.py --type ws_credit --database finance
 ```
 
+load simplyfin bridge transactions (all connected bank accounts):
+```bash
+# one-time: get a setup token at https://beta-bridge.simplefin.org/simplefin/create
+# and add it to .env as SIMPLEFIN_SETUP_TOKEN
+uv run python load-transactions.py --type simplefin --database finance
+```
+
 load pre-categorized excel transactions:
 ```bash
 uv run python load-excel-transactions.py --filepath <path_to_excel>

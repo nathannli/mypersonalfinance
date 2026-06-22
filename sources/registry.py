@@ -87,6 +87,12 @@ CARD_TYPES = {
         "requires_file": False,
         "description": "Wealthsimple Credit",
     },
+    "simplefin": {
+        "module": "sources.api.simplefin",
+        "class_name": "SimplefinStatement",
+        "requires_file": False,
+        "description": "SimplyFIN Bridge (all connected bank accounts)",
+    },
 }
 
 

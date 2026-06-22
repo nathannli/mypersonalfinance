@@ -2,3 +2,5 @@
 POSTGRES_CONNECTION_STRING=postgresql://username:password@host_name_or_ip:postgres_port_number
 WS_DEBT_LINK=https://my.wealthsimple.com/copy-this-part-into-here
 WS_CREDIT_LINK=https://my.wealthsimple.com/copy-this-part-into-here
+# SimplyFIN Bridge: get token from https://beta-bridge.simplefin.org/simplefin/create
+SIMPLEFIN_SETUP_TOKEN=
