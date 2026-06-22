@@ -1,7 +1,7 @@
 import polars as pl
 
-from classes.cc.generics.file_based_card_statement import FileBasedCardStatement
-from classes.cc.ref_data import (
+from sources.base import FileBasedCardStatement
+from sources.ref_data import (
     manual_cc_merchant_category_ref,
     rogers_cc_merchant_category_ref,
 )

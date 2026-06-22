@@ -7,7 +7,7 @@ various credit card statement sources.
 
 import polars as pl
 
-from classes.cc.card_registry import get_card_class, requires_file
+from sources.registry import get_card_class, requires_file
 
 
 class TransactionLoader:

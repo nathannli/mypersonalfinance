@@ -13,3 +13,4 @@ data-files/
 *.pywz
 
 .DS_Store
+.pi/

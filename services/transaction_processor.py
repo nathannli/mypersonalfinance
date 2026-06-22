@@ -10,7 +10,7 @@ import os
 
 import polars as pl
 
-from classes.db.generics.finance_db import FinanceDB
+from db.finance_base import FinanceDB
 from services.transaction_loader import TransactionLoader
 from utils.processing_results import ProcessingResults
 

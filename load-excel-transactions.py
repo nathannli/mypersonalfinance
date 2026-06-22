@@ -7,7 +7,7 @@ import tempfile
 import polars as pl
 import requests
 
-from classes.db.parents_finance_db import ParentsFinanceDB
+from db.parents_finance import ParentsFinanceDB
 
 RPI_IP = "10.20.0.8"
 DISCORD_ALERT_BOT_URL = f"http://{RPI_IP}:30007/alert"
