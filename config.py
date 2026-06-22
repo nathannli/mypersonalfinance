@@ -7,6 +7,7 @@ class Config:
     postgres_connection_string: str
     ws_debt_link: str
     ws_credit_link: str
+    simplefin_setup_token: str
     debug: bool
 
     def __init__(self, debug: bool = False):
@@ -17,8 +18,10 @@ class Config:
         self.postgres_connection_string = os.getenv("POSTGRES_CONNECTION_STRING")
         self.ws_debt_link = os.getenv("WS_DEBIT_LINK")
         self.ws_credit_link = os.getenv("WS_CREDIT_LINK")
+        self.simplefin_setup_token = os.getenv("SIMPLEFIN_SETUP_TOKEN")
         self.debug = debug
         if self.debug:
             print(f"{self.postgres_connection_string=}")
             print(f"{self.ws_debt_link=}")
             print(f"{self.ws_credit_link=}")
+            print(f"{self.simplefin_setup_token=}")
