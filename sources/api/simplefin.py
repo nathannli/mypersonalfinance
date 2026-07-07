@@ -86,8 +86,15 @@ class SimplefinStatement(OnlineCardStatement):
 
     def _parse_access_url(self, access_url: str) -> tuple[str, str, str]:
         # Access URL form: https://user:pass@host/path
+        error_msg = (
+            "Invalid SimpleFIN access URL: expected format https://user:pass@host/path"
+        )
+        if "://" not in access_url or "@" not in access_url:
+            raise ValueError(error_msg)
         scheme, rest = access_url.split("//", 1)
         auth, rest = rest.split("@", 1)
+        if ":" not in auth:
+            raise ValueError(error_msg)
         username, password = auth.split(":", 1)
         base_url = f"{scheme}//{rest}"
         return base_url, username, password
