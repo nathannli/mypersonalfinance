@@ -14,19 +14,19 @@ ACCESS_URL_FILE = os.path.expanduser("~/.simplefin_access_url")
 
 BRIDGE_CREATE_URL = "https://beta-bridge.simplefin.org/simplefin/create"
 
+# (connect, read) timeouts in seconds for outbound SimpleFIN Bridge calls.
+REQUEST_TIMEOUT = (5, 30)
+
 
 class SimplefinStatement(OnlineCardStatement):
+    """Fetch and normalize transactions from the SimpleFIN Bridge (v2 protocol)."""
+
     def __init__(self):
         super().__init__(type="simplefin")
 
     def load_data(self) -> None:
+        """Claim (or reuse) the access URL, fetch accounts, and build the txn frame."""
         setup_token = self.config.simplefin_setup_token
-        if not setup_token:
-            raise ValueError(
-                "SIMPLEFIN_SETUP_TOKEN not set. Get one at "
-                f"{BRIDGE_CREATE_URL} and add it to .env"
-            )
-
         access_url = self._get_access_url(setup_token)
         base_url, username, password = self._parse_access_url(access_url)
         data = self._fetch_accounts(base_url, username, password)
@@ -41,7 +41,9 @@ class SimplefinStatement(OnlineCardStatement):
                     continue
                 rows.append(
                     {
-                        "date": datetime.datetime.fromtimestamp(posted).date(),
+                        "date": datetime.datetime.fromtimestamp(
+                            posted, tz=datetime.timezone.utc
+                        ).date(),
                         "merchant": txn.get("description", ""),
                         # Protocol: positive amount = deposit. Negate for the
                         # project's expense convention (positive cost = expense).
@@ -61,11 +63,19 @@ class SimplefinStatement(OnlineCardStatement):
         )
 
     def _get_access_url(self, setup_token: str) -> str:
+        """Return a cached access URL if present, else claim one from the setup token."""
         if os.path.exists(ACCESS_URL_FILE):
             with open(ACCESS_URL_FILE) as f:
                 access_url = f.read().strip()
             if access_url:
                 return access_url
+
+        if not setup_token:
+            raise ValueError(
+                "No cached SimpleFIN access URL found and SIMPLEFIN_SETUP_TOKEN is "
+                "not set. Get one at "
+                f"{BRIDGE_CREATE_URL} and add it to .env"
+            )
 
         access_url = self._claim_access_url(setup_token)
         with open(ACCESS_URL_FILE, "w") as f:
@@ -74,8 +84,9 @@ class SimplefinStatement(OnlineCardStatement):
         return access_url
 
     def _claim_access_url(self, setup_token: str) -> str:
+        """Decode the one-time setup token and POST to claim the access URL."""
         claim_url = base64.b64decode(setup_token).decode()
-        response = requests.post(claim_url)
+        response = requests.post(claim_url, timeout=REQUEST_TIMEOUT)
         if response.status_code == 403:
             raise ValueError(
                 "SimpleFIN setup token already claimed or invalid. "
@@ -85,6 +96,7 @@ class SimplefinStatement(OnlineCardStatement):
         return response.text.strip()
 
     def _parse_access_url(self, access_url: str) -> tuple[str, str, str]:
+        """Split an access URL into (base_url, username, password)."""
         # Access URL form: https://user:pass@host/path
         error_msg = (
             "Invalid SimpleFIN access URL: expected format https://user:pass@host/path"
@@ -100,10 +112,12 @@ class SimplefinStatement(OnlineCardStatement):
         return base_url, username, password
 
     def _fetch_accounts(self, base_url: str, username: str, password: str) -> dict:
+        """GET /accounts with Basic Auth and map 402/403 to actionable errors."""
         response = requests.get(
             f"{base_url}/accounts",
             auth=(username, password),
             params={"version": "2"},
+            timeout=REQUEST_TIMEOUT,
         )
         if response.status_code == 402:
             raise ValueError("SimpleFIN: payment required")

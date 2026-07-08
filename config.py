@@ -21,7 +21,7 @@ class Config:
         self.simplefin_setup_token = os.getenv("SIMPLEFIN_SETUP_TOKEN")
         self.debug = debug
         if self.debug:
-            print(f"{self.postgres_connection_string=}")
+            print("postgres_connection_string=<redacted>")
             print(f"{self.ws_debt_link=}")
             print(f"{self.ws_credit_link=}")
-            print(f"{self.simplefin_setup_token=}")
+            print("simplefin_setup_token=<redacted>")
