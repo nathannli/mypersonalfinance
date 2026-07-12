@@ -2,6 +2,7 @@ import base64
 import datetime
 import os
 import stat
+from urllib.parse import urlsplit
 
 import polars as pl
 import requests
@@ -16,6 +17,15 @@ BRIDGE_CREATE_URL = "https://beta-bridge.simplefin.org/simplefin/create"
 
 # (connect, read) timeouts in seconds for outbound SimpleFIN Bridge calls.
 REQUEST_TIMEOUT = (5, 30)
+
+
+def _is_https_url(url: str) -> bool:
+    """Return whether a URL has an HTTPS scheme and hostname."""
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme.lower() == "https" and parsed.hostname is not None
+    except ValueError:
+        return False
 
 
 class SimplefinStatement(OnlineCardStatement):
@@ -86,6 +96,8 @@ class SimplefinStatement(OnlineCardStatement):
     def _claim_access_url(self, setup_token: str) -> str:
         """Decode the one-time setup token and POST to claim the access URL."""
         claim_url = base64.b64decode(setup_token).decode()
+        if not _is_https_url(claim_url):
+            raise ValueError("Invalid SimpleFIN setup token: claim URL must use HTTPS")
         response = requests.post(claim_url, timeout=REQUEST_TIMEOUT)
         if response.status_code == 403:
             raise ValueError(
@@ -101,7 +113,7 @@ class SimplefinStatement(OnlineCardStatement):
         error_msg = (
             "Invalid SimpleFIN access URL: expected format https://user:pass@host/path"
         )
-        if "://" not in access_url or "@" not in access_url:
+        if not _is_https_url(access_url) or "@" not in access_url:
             raise ValueError(error_msg)
         scheme, rest = access_url.split("//", 1)
         auth, rest = rest.split("@", 1)
