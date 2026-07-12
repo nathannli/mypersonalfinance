@@ -2,7 +2,7 @@ import base64
 import datetime
 import os
 import stat
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import polars as pl
 import requests
@@ -113,15 +113,26 @@ class SimplefinStatement(OnlineCardStatement):
         error_msg = (
             "Invalid SimpleFIN access URL: expected format https://user:pass@host/path"
         )
-        if not _is_https_url(access_url) or "@" not in access_url:
+        try:
+            parsed = urlsplit(access_url)
+        except ValueError as err:
+            raise ValueError(error_msg) from err
+        if (
+            not _is_https_url(access_url)
+            or parsed.username is None
+            or parsed.password is None
+        ):
             raise ValueError(error_msg)
-        scheme, rest = access_url.split("//", 1)
-        auth, rest = rest.split("@", 1)
-        if ":" not in auth:
-            raise ValueError(error_msg)
-        username, password = auth.split(":", 1)
-        base_url = f"{scheme}//{rest}"
-        return base_url, username, password
+        base_url = urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc.rsplit("@", 1)[-1],
+                parsed.path,
+                parsed.query,
+                "",
+            )
+        )
+        return base_url, unquote(parsed.username), unquote(parsed.password)
 
     def _fetch_accounts(self, base_url: str, username: str, password: str) -> dict:
         """GET /accounts with Basic Auth and map 402/403 to actionable errors."""
