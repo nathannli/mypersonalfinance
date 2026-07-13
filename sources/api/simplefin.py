@@ -1,7 +1,7 @@
 import base64
 import datetime
 import os
-import stat
+import tempfile
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import polars as pl
@@ -10,7 +10,7 @@ import requests
 from sources.base import OnlineCardStatement
 
 # Path to persist the one-time-claimed Access URL.
-# The Access URL embeds Basic Auth credentials, so the file is chmod 600.
+# The Access URL embeds Basic Auth credentials, so it is stored with mode 600.
 ACCESS_URL_FILE = os.path.expanduser("~/.simplefin_access_url")
 
 BRIDGE_CREATE_URL = "https://beta-bridge.simplefin.org/simplefin/create"
@@ -98,9 +98,18 @@ class SimplefinStatement(OnlineCardStatement):
             )
 
         access_url = self._claim_access_url(setup_token)
-        with open(ACCESS_URL_FILE, "w") as f:
-            f.write(access_url)
-        os.chmod(ACCESS_URL_FILE, stat.S_IRUSR | stat.S_IWUSR)
+        fd, temporary_path = tempfile.mkstemp(
+            dir=os.path.dirname(ACCESS_URL_FILE) or ".",
+            prefix=".simplefin_access_url.",
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(access_url)
+            os.replace(temporary_path, ACCESS_URL_FILE)
+        except Exception:
+            os.unlink(temporary_path)
+            raise
         return access_url
 
     def _claim_access_url(self, setup_token: str) -> str:
