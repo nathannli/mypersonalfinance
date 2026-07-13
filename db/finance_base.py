@@ -51,6 +51,8 @@ class FinanceDB(PostgresDB):
         self, source: str, account_id: str, transaction_id: str
     ) -> bool:
         """Return whether an externally identified transaction was already imported."""
+        account_id = account_id.replace("\xa0", " ").strip()
+        transaction_id = transaction_id.replace("\xa0", " ").strip()
         return self._check_exists(
             "expenses",
             {
