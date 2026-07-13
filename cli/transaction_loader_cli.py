@@ -206,6 +206,10 @@ Supported card types:
 
             # Validate argument combinations
             self._validate_arguments(card_type, file_path, folder_path)
+            if card_type == "simplefin" and database_name == "parents_finance":
+                raise ValueError(
+                    "SimpleFIN is only supported with the finance database"
+                )
 
             # Build list of files to process
             files_to_process = self._build_file_list(card_type, file_path, folder_path)
