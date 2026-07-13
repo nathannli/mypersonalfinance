@@ -72,10 +72,11 @@ class TransactionProcessor:
             if not exists:
                 print("\n\n")
                 print("New transaction found")
-                self.database.insert_expense(
+                inserted = self.database.insert_expense(
                     date, merchant, cost, card_type, cc_category, **source_kwargs
                 )
-                new_inserted_rows += 1
+                if inserted:
+                    new_inserted_rows += 1
 
         return new_inserted_rows
 
