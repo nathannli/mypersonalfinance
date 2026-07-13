@@ -47,6 +47,19 @@ class FinanceDB(PostgresDB):
             "expenses", {"date": date, "merchant": merchant, "cost": cost}
         )
 
+    def check_if_source_expense_exists(
+        self, source: str, account_id: str, transaction_id: str
+    ) -> bool:
+        """Return whether an externally identified transaction was already imported."""
+        return self._check_exists(
+            "expenses",
+            {
+                "source": source,
+                "source_account_id": account_id,
+                "source_transaction_id": transaction_id,
+            },
+        )
+
     def get_expense_id(self, date: date, merchant: str, cost: float) -> int:
         """
         Get the id of an expense in the database.

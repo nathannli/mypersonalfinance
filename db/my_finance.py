@@ -73,6 +73,9 @@ class MyFinanceDB(FinanceDB):
         cost: float,
         card_type: str,
         cc_category: str | None = None,
+        source: str | None = None,
+        source_account_id: str | None = None,
+        source_transaction_id: str | None = None,
     ) -> None:
         print(f"Transaction on {date} at {merchant} for {cost}")
         category = None
@@ -133,8 +136,20 @@ class MyFinanceDB(FinanceDB):
                 print(f"Record already exists for {date} at {merchant}. Skipping...")
                 return
         # insert the expense
-        query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
-        self.insert(query, (date, merchant, cost, category_id, subcategory_id))
+        query = "insert into expenses (date, merchant, cost, category_id, subcategory_id, source, source_account_id, source_transaction_id) values (%s, %s, %s, %s, %s, %s, %s, %s)"
+        self.insert(
+            query,
+            (
+                date,
+                merchant,
+                cost,
+                category_id,
+                subcategory_id,
+                source,
+                source_account_id,
+                source_transaction_id,
+            ),
+        )
         # ask the user if they want to add the merchant to the auto_match table
         if not found_match:
             # if merchant is "Interac e-Transfer® Out", skip

@@ -53,12 +53,27 @@ class TransactionProcessor:
             cost = row["cost"]
             cc_category = row["cc_category"]
 
-            # Check if transaction already exists in expenses table
-            if not self.database.check_if_expense_exists(date, merchant, cost):
+            # SimpleFIN transaction IDs are only unique within their account.
+            if card_type == "simplefin":
+                source_account_id = row["source_account_id"]
+                source_transaction_id = row["source_transaction_id"]
+                exists = self.database.check_if_source_expense_exists(
+                    "simplefin", source_account_id, source_transaction_id
+                )
+                source_kwargs = {
+                    "source": "simplefin",
+                    "source_account_id": source_account_id,
+                    "source_transaction_id": source_transaction_id,
+                }
+            else:
+                exists = self.database.check_if_expense_exists(date, merchant, cost)
+                source_kwargs = {}
+
+            if not exists:
                 print("\n\n")
                 print("New transaction found")
                 self.database.insert_expense(
-                    date, merchant, cost, card_type, cc_category
+                    date, merchant, cost, card_type, cc_category, **source_kwargs
                 )
                 new_inserted_rows += 1
 

@@ -43,7 +43,13 @@ class SimplefinStatement(OnlineCardStatement):
 
         rows = []
         for account in data.get("accounts", []):
+            account_id = account.get("id")
+            if not account_id:
+                raise ValueError("SimpleFIN account is missing its required ID")
             for txn in account.get("transactions", []):
+                transaction_id = txn.get("id")
+                if not transaction_id:
+                    raise ValueError("SimpleFIN transaction is missing its required ID")
                 posted = txn.get("posted", 0)
                 if not posted:
                     # Pending or unposted transaction; skip — it'll settle and
@@ -59,6 +65,8 @@ class SimplefinStatement(OnlineCardStatement):
                         # project's expense convention (positive cost = expense).
                         "cost": -float(txn.get("amount", "0")),
                         "cc_category": None,
+                        "source_account_id": str(account_id),
+                        "source_transaction_id": str(transaction_id),
                     }
                 )
 
@@ -69,6 +77,8 @@ class SimplefinStatement(OnlineCardStatement):
                 "merchant": pl.Utf8,
                 "cost": pl.Float64,
                 "cc_category": pl.Utf8,
+                "source_account_id": pl.Utf8,
+                "source_transaction_id": pl.Utf8,
             },
         )
 
