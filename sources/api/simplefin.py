@@ -51,7 +51,7 @@ class SimplefinStatement(OnlineCardStatement):
                 if not transaction_id:
                     raise ValueError("SimpleFIN transaction is missing its required ID")
                 posted = txn.get("posted", 0)
-                if not posted:
+                if not posted or txn.get("pending"):
                     # Pending or unposted transaction; skip — it'll settle and
                     # appear as posted in a later fetch.
                     continue
