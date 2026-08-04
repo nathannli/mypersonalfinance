@@ -6,8 +6,10 @@ from unittest.mock import MagicMock, Mock
 from scripts.download_amex_transactions import (
     capture_download,
     destination_paths,
+    loader_command,
     parse_args,
     sanitize_filename,
+    validate_download,
 )
 
 
@@ -47,6 +49,22 @@ class TestDownloadAmexTransactions(unittest.TestCase):
                 capture_download(page, Path(directory))
 
             self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_v11_validate_csv_download_and_loader_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "activity export.csv"
+            path.write_text(
+                "Date,Date Processed,Description,Card Member,Account #,Amount\n"
+                "03 Aug 2026,04 Aug 2026,MERCHANT ONE,TEST USER,12345,12.34\n"
+            )
+
+            validate_download(path)
+
+            self.assertEqual(
+                loader_command(path, "finance"),
+                "uv run python load-transactions.py --type amex --filepath "
+                f"'{path}' --database finance",
+            )
 
 
 if __name__ == "__main__":

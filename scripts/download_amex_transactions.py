@@ -3,6 +3,7 @@
 
 import argparse
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,34 @@ def capture_download(page: Any, output_dir: Path) -> Path:
         raise RuntimeError(f"Amex statement download failed: {exc}") from exc
 
 
+def validate_download(path: Path) -> None:
+    from sources.csv.amex import AmexStatement
+
+    columns = AmexStatement(str(path)).get_df().columns
+    expected = ["date", "merchant", "cost", "cc_category"]
+    if columns != expected:
+        raise RuntimeError(
+            f"Downloaded Amex file has unsupported standardized columns: {columns}"
+        )
+
+
+def loader_command(path: Path, database: str) -> str:
+    return shlex.join(
+        [
+            "uv",
+            "run",
+            "python",
+            "load-transactions.py",
+            "--type",
+            "amex",
+            "--filepath",
+            str(path),
+            "--database",
+            database,
+        ]
+    )
+
+
 def run(output_dir: Path, database: str) -> Path:
     try:
         from playwright.sync_api import sync_playwright
@@ -153,14 +182,12 @@ def run(output_dir: Path, database: str) -> Path:
             navigate_to_export(page)
             select_csv(page)
             saved_path = capture_download(page, output_dir)
+            validate_download(saved_path)
         finally:
             context.close()
 
     print(f"Downloaded Amex statement: {saved_path}")
-    print(
-        "Load manually: uv run python load-transactions.py "
-        f"--type amex --filepath {saved_path} --database {database}"
-    )
+    print(f"Load manually: {loader_command(saved_path, database)}")
     return saved_path
 
 

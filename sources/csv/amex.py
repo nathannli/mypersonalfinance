@@ -1,4 +1,5 @@
 import polars as pl
+from pathlib import Path
 
 from sources.base import FileBasedCardStatement
 
@@ -24,6 +25,22 @@ class AmexStatement(FileBasedCardStatement):
         Raises:
             ValueError: If the file doesn't exist or required headers can't be found
         """
+        if Path(self.file_path).suffix.lower() == ".csv":
+            df = pl.read_csv(
+                source=self.file_path,
+                schema_overrides={
+                    "Date": pl.Utf8,
+                    "Description": pl.Utf8,
+                    "Amount": pl.Utf8,
+                },
+            ).select(
+                pl.col("Date").alias("date"),
+                pl.col("Description").alias("merchant"),
+                pl.col("Amount").alias("cost"),
+            )
+            self.df = self._standardize(df)
+            return
+
         df = pl.read_excel(source=self.file_path, has_header=False)
 
         # Find the header row that contains 'Date', 'Description', 'Amount'
@@ -38,57 +55,47 @@ class AmexStatement(FileBasedCardStatement):
                 "Could not find header row with 'Date', 'Description', 'Amount'"
             )
 
-        # Filter rows after the header row and drop unnecessary columns
+        headers = list(df.row(header_row))
+        columns = {
+            name: f"column_{headers.index(name) + 1}"
+            for name in ("Date", "Description", "Amount")
+        }
+
+        # Filter rows after the header row and select transaction columns
         df1 = (
             df.with_row_index()
             .filter(pl.col("index") > header_row)
-            .drop("index", "column_3")
+            .select(
+                pl.col(columns["Date"]).alias("date"),
+                pl.col(columns["Description"]).alias("merchant"),
+                pl.col(columns["Amount"]).alias("cost"),
+            )
         )
 
-        # Rename columns to more normalized names
-        df2 = df1.rename(
-            {
-                "column_1": "date",
-                "column_2": "merchant",
-                "column_5": "cost",
-            }
-        )
+        self.df = self._standardize(df1)
+
+    @staticmethod
+    def _standardize(df: pl.DataFrame) -> pl.DataFrame:
         # Add a dummy cc_category column with None values
-        df3 = df2.with_columns(pl.lit(None).alias("cc_category"))
+        df = df.with_columns(pl.lit(None).alias("cc_category"))
 
         # Convert date strings to date objects with handling for both formats
-        # For months with 3 letters or less (e.g., "May"), use "%d %b %Y"
-        # For months with more than 3 letters (e.g., "Apr."), use "%d %b. %Y"
-        # Filter dates with period (e.g., "Apr.") and convert them
-        df_with_period = df3.filter(pl.col("date").str.contains(r"\. "))
-        df_with_period = df_with_period.with_columns(
-            pl.col("date").str.to_date(format="%d %b. %Y")
+        df = df.with_columns(
+            pl.col("date")
+            .str.replace(". ", " ", literal=True)
+            .str.to_date(format="%d %b %Y")
         )
-
-        # Filter dates without period (e.g., "May") and convert them
-        df_without_period = df3.filter(~pl.col("date").str.contains(r"\. "))
-        df_without_period = df_without_period.with_columns(
-            pl.col("date").str.to_date(format="%d %b %Y")
-        )
-
-        # Union the two dataframes
-        df4 = pl.concat([df_with_period, df_without_period])
 
         # Convert amount strings to decimal numbers, removing dollar signs and commas
-        df5 = df4.with_columns(
-            pl.col("cost")
-            .str.replace(r"\$", "")
-            .str.replace(",", "")
-            .str.to_decimal(scale=2)
+        df = df.with_columns(
+            pl.col("cost").str.replace_all(r"[$,]", "").str.to_decimal(scale=2)
         )
 
         # Filter out rows where merchant is "PAYMENT RECEIVED - THANK YOU"
         # This is a bill payment to Amex, not an expense
-        df6 = df5.filter(
+        return df.filter(
             ~pl.col("merchant").str.contains("PAYMENT RECEIVED - THANK YOU")
-        )
-
-        self.df = df6
+        ).select("date", "merchant", "cost", "cc_category")
 
 
 class AmexAnnualStatement(FileBasedCardStatement):
