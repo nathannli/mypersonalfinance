@@ -47,7 +47,7 @@ V10|Browser process, profile, authenticated session, and downloaded files remain
 
 id|status|goal|cites
 T1|x|Run one user-supervised authenticated discovery session; confirm sole-card statement navigation, offered export formats, and downloaded schema without capturing secrets|C1,C2,C3,I3,I4,I6
-T2|.|Add optional local Playwright dependency, dedicated-profile defaults outside the repo, and ignore rules for any local browser/download artifacts|C3,C4,C10,I2,I9,V1,V2,V7,V10
+T2|x|Add optional local Playwright dependency, dedicated-profile defaults outside the repo, and ignore rules for any local browser/download artifacts|C3,C4,C10,I2,I9,V1,V2,V7,V10
 T3|.|Implement the local headed Amex downloader, manual-auth wait, resilient statement navigation, download capture, safe naming, collision handling, timeout, and cleanup|C2,C5,C10,I2,I3,I4,I5,V3,V5,V9,V10
 T4|.|Connect downloaded-file validation to `AmexStatement`; make a focused parser compatibility edit only if T1 proves it necessary; print the existing loader handoff command|C6,C7,I6,I7,I8,V4,V6
 T5|.|Add focused tests with local HTML/download fixtures and mocked browser behavior for auth wait, navigation, successful download, collision, timeout, cleanup, and parser validation|C9,V5,V8,V9
