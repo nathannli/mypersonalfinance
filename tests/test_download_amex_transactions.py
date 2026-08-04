@@ -1,25 +1,21 @@
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from subprocess import run
-import sys
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, patch
 
 from scripts.download_amex_transactions import (
-    capture_download,
-    destination_paths,
     loader_command,
     parse_args,
+    run_osascript,
     sanitize_filename,
-    validate_download,
 )
-
-FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestDownloadAmexTransactions(unittest.TestCase):
     def test_v12_module_entrypoint_resolves_repository_imports(self) -> None:
-        result = run(
+        result = subprocess.run(
             [sys.executable, "-m", "scripts.download_amex_transactions", "--help"],
             capture_output=True,
             text=True,
@@ -40,40 +36,28 @@ class TestDownloadAmexTransactions(unittest.TestCase):
     def test_sanitize_filename_removes_path_and_unsafe_characters(self) -> None:
         self.assertEqual(sanitize_filename("../../activity (1).csv"), "activity_1_.csv")
 
-    def test_destination_refuses_overwrite(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            existing = Path(directory) / "activity.csv"
-            existing.touch()
+    @patch("scripts.download_amex_transactions.subprocess.run")
+    def test_osascript_error_is_actionable(self, run: MagicMock) -> None:
+        run.return_value = MagicMock(returncode=1, stderr="Apple Events disabled", stdout="")
 
-            with self.assertRaisesRegex(FileExistsError, "Refusing to overwrite"):
-                destination_paths(Path(directory), "activity.csv")
+        with self.assertRaisesRegex(RuntimeError, "Apple Events disabled"):
+            run_osascript("return true")
 
-    def test_failed_save_removes_partial_file(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            page = MagicMock()
-            download = Mock(suggested_filename="activity.csv")
-            page.expect_download.return_value.__enter__.return_value.value = download
+    @patch("scripts.download_amex_transactions.subprocess.run")
+    def test_v15_osascript_timeout_is_actionable(self, run: MagicMock) -> None:
+        run.side_effect = subprocess.TimeoutExpired("osascript", 5)
 
-            def fail_save(path: Path) -> None:
-                Path(path).touch()
-                raise OSError("download interrupted")
+        with self.assertRaisesRegex(RuntimeError, "AppleScript timed out"):
+            run_osascript("return true")
 
-            download.save_as.side_effect = fail_save
-
-            with self.assertRaisesRegex(RuntimeError, "download interrupted"):
-                capture_download(page, Path(directory))
-
-            self.assertEqual(list(Path(directory).iterdir()), [])
-
-    def test_v11_validate_csv_download_and_loader_handoff(self) -> None:
+    def test_loader_handoff_quotes_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "activity export.csv"
-            path.write_bytes((FIXTURES / "activity.csv").read_bytes())
 
-            validate_download(path)
+            command = loader_command(path, "finance")
 
             self.assertEqual(
-                loader_command(path, "finance"),
+                command,
                 "uv run python load-transactions.py --type amex --filepath "
                 f"'{path}' --database finance",
             )

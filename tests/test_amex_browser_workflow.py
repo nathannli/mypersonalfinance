@@ -1,9 +1,8 @@
-import sys
+import json
 import tempfile
-import types
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from scripts import download_amex_transactions as downloader
 
@@ -17,82 +16,131 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         for label in ("Card", "Statement", "Export Statement Data", "CSV", "Download"):
             self.assertIn(label, html)
 
-    def test_wait_for_authentication_accepts_authenticated_redirect(self) -> None:
-        page = MagicMock(url="https://global.americanexpress.com/dashboard")
+    @patch.object(downloader, "find_amex_url", return_value=downloader.AUTHENTICATED_URL)
+    def test_wait_for_authentication_reuses_normal_chrome(self, find_url: MagicMock) -> None:
+        with patch.object(downloader.subprocess, "run") as run:
+            downloader.wait_for_authentication()
 
-        downloader.wait_for_authentication(page)
+        find_url.assert_called_once_with()
+        run.assert_not_called()
 
-        page.wait_for_url.assert_not_called()
+    @patch.object(downloader, "run_osascript", return_value=downloader.AUTHENTICATED_URL)
+    def test_v16_authenticated_tab_has_priority(self, run_osascript: MagicMock) -> None:
+        self.assertEqual(downloader.find_amex_url(), downloader.AUTHENTICATED_URL)
 
-    def test_wait_for_authentication_reports_timeout(self) -> None:
-        page = MagicMock(url=downloader.LOGIN_URL)
-        page.wait_for_url.side_effect = TimeoutError("timed out")
-
-        with self.assertRaisesRegex(RuntimeError, "authenticated Amex"):
-            downloader.wait_for_authentication(page)
-
-    @patch.object(downloader, "click_named")
-    @patch.object(downloader, "ensure_single_card")
-    def test_navigation_uses_statement_export_path(
-        self, ensure_single_card: MagicMock, click_named: MagicMock
-    ) -> None:
-        page = MagicMock()
-
-        downloader.navigate_to_export(page)
-
-        ensure_single_card.assert_called_once_with(page)
-        self.assertEqual(
-            click_named.call_args_list,
-            [
-                unittest.mock.call(page, "Statement"),
-                unittest.mock.call(page, "Export Statement Data"),
-            ],
+        script = run_osascript.call_args.args[0]
+        self.assertLess(
+            script.index('starts with "https://global.americanexpress.com/"'),
+            script.index('contains "americanexpress.com"'),
         )
 
-    def test_multiple_cards_exit_with_actionable_error(self) -> None:
-        page = MagicMock()
-        selector = MagicMock()
-        selector.count.return_value = 1
-        page.get_by_role.side_effect = lambda role, **_: (
-            selector if role == "combobox" else MagicMock(count=lambda: 2)
-        )
+    @patch.object(downloader, "run_osascript", return_value="clicked")
+    def test_click_visible_uses_exact_dom_text(self, run_osascript: MagicMock) -> None:
+        downloader.click_visible("Statement")
 
+        script = run_osascript.call_args.args[0]
+        self.assertIn("=== expected", script)
+        self.assertIn('const expected = \\"Statement\\"', script)
+
+    @patch.object(downloader, "execute_chrome_js", return_value="2")
+    def test_multiple_cards_exit_with_actionable_error(self, execute_js: MagicMock) -> None:
         with self.assertRaisesRegex(RuntimeError, "Expected one Amex card; found 2"):
-            downloader.ensure_single_card(page)
+            downloader.ensure_single_card()
 
-    def test_csv_radio_is_selected(self) -> None:
-        page = MagicMock()
-        radio = MagicMock()
-        radio.count.return_value = 1
-        page.get_by_role.return_value = radio
+        execute_js.assert_called_once()
 
-        downloader.select_csv(page)
+    @patch.object(downloader, "click_visible")
+    @patch.object(downloader, "navigate_visible_link")
+    @patch.object(downloader, "ensure_single_card")
+    @patch.object(downloader, "execute_chrome_js")
+    @patch.object(downloader, "wait_until")
+    def test_navigation_uses_current_amex_path(
+        self,
+        wait_until: MagicMock,
+        execute_js: MagicMock,
+        ensure_single_card: MagicMock,
+        navigate_visible_link: MagicMock,
+        click_visible: MagicMock,
+    ) -> None:
+        execute_js.return_value = "/dashboard"
 
-        radio.first.check.assert_called_once_with(timeout=downloader.ACTION_TIMEOUT_MS)
+        downloader.navigate_to_export()
 
-    def test_successful_download_has_no_partial_file(self) -> None:
+        ensure_single_card.assert_called_once_with()
+        self.assertEqual(
+            click_visible.call_args_list,
+            [call("Statement")],
+        )
+        self.assertEqual(wait_until.call_count, 4)
+
+    @patch.object(downloader, "click_visible")
+    @patch.object(downloader, "wait_until")
+    @patch.object(downloader, "execute_chrome_js")
+    def test_csv_selection_returns_native_click_point(
+        self, execute_js: MagicMock, wait_until: MagicMock, click_visible: MagicMock
+    ) -> None:
+        execute_js.side_effect = ["true", json.dumps({"x": 967, "y": 887})]
+
+        point = downloader.select_csv_and_get_download_point()
+
+        self.assertEqual(point, (967, 887))
+        click_visible.assert_not_called()
+        wait_until.assert_called_once()
+        self.assertIn("getBoundingClientRect", execute_js.call_args.args[0])
+
+    @patch.object(downloader.subprocess, "run")
+    def test_v14_native_click_uses_core_graphics(self, run: MagicMock) -> None:
+        run.return_value = MagicMock(returncode=0)
+
+        downloader.native_click(967, 887)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["swift", "-e"])
+        self.assertIn("CGPoint(x: 967, y: 887)", command[2])
+        self.assertIn("leftMouseDown", command[2])
+        self.assertIn("leftMouseUp", command[2])
+
+    def test_successful_download_moves_without_partial_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            page = MagicMock()
-            download = MagicMock(suggested_filename="activity.csv")
-            page.expect_download.return_value.__enter__.return_value.value = download
-            download.save_as.side_effect = lambda path: Path(path).write_bytes(b"csv")
+            root = Path(directory)
+            download = root / "activity (1).csv"
+            download.write_bytes((FIXTURES / "activity.csv").read_bytes())
+            output = root / "output"
 
-            saved = downloader.capture_download(page, Path(directory))
+            saved = downloader.move_download(download, output)
 
-            self.assertEqual(saved.read_bytes(), b"csv")
-            self.assertEqual(
-                [path.name for path in Path(directory).iterdir()], ["activity.csv"]
-            )
+            self.assertEqual(saved.name, "activity_1_.csv")
+            self.assertTrue(saved.exists())
+            self.assertFalse(download.exists())
 
-    def test_download_timeout_leaves_no_file(self) -> None:
+    def test_collision_refuses_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            page = MagicMock()
-            page.expect_download.side_effect = TimeoutError("timed out")
+            root = Path(directory)
+            download = root / "activity.csv"
+            download.write_text("new")
+            output = root / "output"
+            output.mkdir()
+            (output / "activity.csv").write_text("existing")
 
-            with self.assertRaisesRegex(RuntimeError, "timed out"):
-                downloader.capture_download(page, Path(directory))
+            with self.assertRaisesRegex(FileExistsError, "Refusing to overwrite"):
+                downloader.move_download(download, output)
 
-            self.assertEqual(list(Path(directory).iterdir()), [])
+            self.assertEqual((output / "activity.csv").read_text(), "existing")
+
+    @patch.object(downloader.time, "sleep")
+    @patch.object(downloader.time, "monotonic", side_effect=[0, 31])
+    def test_download_timeout_removes_new_partial(
+        self, monotonic: MagicMock, sleep: MagicMock
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            partial = root / "activity.csv.crdownload"
+            partial.touch()
+
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting"):
+                downloader.wait_for_download(root, set())
+
+            self.assertFalse(partial.exists())
 
     def test_v11_synthetic_download_parses_exact_contract(self) -> None:
         path = FIXTURES / "activity.csv"
@@ -105,43 +153,40 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         self.assertEqual(df.columns, ["date", "merchant", "cost", "cc_category"])
         self.assertEqual(df.height, 1)
 
-    def test_run_uses_headed_persistent_context_and_always_closes(self) -> None:
-        manager = MagicMock()
-        playwright = manager.__enter__.return_value
-        context = playwright.chromium.launch_persistent_context.return_value
-        context.pages = [MagicMock()]
-        sync_api = types.ModuleType("playwright.sync_api")
-        sync_api.sync_playwright = MagicMock(return_value=manager)
-        playwright_package = types.ModuleType("playwright")
-        playwright_package.sync_api = sync_api
+    @patch.object(downloader, "validate_download")
+    @patch.object(downloader, "move_download")
+    @patch.object(downloader, "wait_for_download")
+    @patch.object(downloader, "native_click")
+    @patch.object(downloader, "select_csv_and_get_download_point", return_value=(1, 2))
+    @patch.object(downloader, "chrome_download_dir")
+    @patch.object(downloader, "navigate_to_export")
+    @patch.object(downloader, "wait_for_authentication")
+    def test_run_orchestrates_normal_chrome_without_loading_database(
+        self,
+        wait_for_authentication: MagicMock,
+        navigate_to_export: MagicMock,
+        chrome_download_dir: MagicMock,
+        select_point: MagicMock,
+        native_click: MagicMock,
+        wait_for_download: MagicMock,
+        move_download: MagicMock,
+        validate_download: MagicMock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            chrome_download_dir.return_value = root
+            downloaded = root / "activity.csv"
+            wait_for_download.return_value = downloaded
+            saved = root / "output" / "activity.csv"
+            move_download.return_value = saved
 
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            patch.dict(
-                sys.modules,
-                {"playwright": playwright_package, "playwright.sync_api": sync_api},
-            ),
-            patch.object(downloader, "wait_for_authentication"),
-            patch.object(downloader, "navigate_to_export"),
-            patch.object(downloader, "select_csv"),
-            patch.object(
-                downloader,
-                "capture_download",
-                return_value=FIXTURES / "activity.csv",
-            ),
-            patch.object(
-                downloader, "validate_download", side_effect=ValueError("bad file")
-            ),
-            self.assertRaisesRegex(ValueError, "bad file"),
-        ):
-            downloader.run(Path(directory), "finance")
+            result = downloader.run(root / "output", "finance")
 
-        playwright.chromium.launch_persistent_context.assert_called_once_with(
-            downloader.AMEX_BROWSER_PROFILE_DIR,
-            headless=False,
-            accept_downloads=True,
-        )
-        context.close.assert_called_once_with()
+        self.assertEqual(result, saved)
+        wait_for_authentication.assert_called_once_with()
+        navigate_to_export.assert_called_once_with()
+        native_click.assert_called_once_with(1, 2)
+        validate_download.assert_called_once_with(saved)
 
 
 if __name__ == "__main__":

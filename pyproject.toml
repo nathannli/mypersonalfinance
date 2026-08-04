@@ -16,9 +16,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-browser = [
-    "playwright",
-]
 wealthsimple = [
     "wealthsimpleton",
 ]
