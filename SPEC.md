@@ -19,14 +19,14 @@ C10|Use local Playwright only. No Browserbase, remote browser, or hosted browser
 
 ## §I
 
-I1|CLI|`uv run python scripts/download_amex_transactions.py --output-dir <directory>`
-I2|Auth|Launch local headed Chromium at `https://www.americanexpress.com/en-ca/account/login/` with a dedicated user-data directory outside the repo. Wait for the user to finish login/MFA and reach an authenticated statement page.
+I1|CLI|`uv run python scripts/download_amex_transactions.py --output-dir <directory> --database <finance|parents_finance>`; `--database` is required and selected by the user.
+I2|Auth|Launch local headed Chromium at `https://www.americanexpress.com/en-ca/account/login/` with a dedicated user-data directory outside the repo. Wait for the user to finish login/MFA and reach an authenticated account landing state; automation then navigates to statements.
 I3|Amex flow|Follow the official Online Services path: `Statement` -> `Export Statement Data` -> select the transaction data type -> download. Prefer role, label, and visible-text locators over brittle CSS selectors.
 I4|Card|Use the account's sole Amex card. Exit with an actionable error if the account later exposes zero or multiple cards.
 I5|Download|Capture the browser download event, sanitize the server-suggested filename, save into `--output-dir`, refuse silent overwrite, and remove partial output after failure.
 I6|Format discovery|During the first authenticated smoke test, record which consumer export formats Amex actually offers. Prefer the format already accepted by `AmexStatement`; if unavailable, make the narrowest parser change needed for the exported file.
 I7|Validation|Before reporting success, parse the saved artifact through the Amex source and confirm the standardized columns are exactly `date`, `merchant`, `cost`, and `cc_category`.
-I8|Handoff|Print the saved path and the existing loader command needed to ingest it. Do not run that command automatically.
+I8|Handoff|Print the saved path and `uv run python load-transactions.py --type amex --filepath <saved-path> --database <user-selected-database>`. Do not run that command automatically.
 I9|Dependency|Keep Playwright in an optional browser-automation dependency group and document the one-time Chromium installation command.
 I10|Reference|Amex Canada login is `https://www.americanexpress.com/en-ca/account/login/`; Amex documents the Online Services export path at `https://www.americanexpress.com/en-ca/customer-service/payments-and-billings/faq.card-statements.html`.
 
@@ -46,7 +46,7 @@ V10|Browser process, profile, authenticated session, and downloaded files remain
 ## §T
 
 id|status|goal|cites
-T1|.|Run one user-supervised authenticated discovery session; confirm sole-card statement navigation, offered export formats, and downloaded schema without capturing secrets|C1,C2,C3,I3,I4,I6
+T1|x|Run one user-supervised authenticated discovery session; confirm sole-card statement navigation, offered export formats, and downloaded schema without capturing secrets|C1,C2,C3,I3,I4,I6
 T2|.|Add optional local Playwright dependency, dedicated-profile defaults outside the repo, and ignore rules for any local browser/download artifacts|C3,C4,C10,I2,I9,V1,V2,V7,V10
 T3|.|Implement the local headed Amex downloader, manual-auth wait, resilient statement navigation, download capture, safe naming, collision handling, timeout, and cleanup|C2,C5,C10,I2,I3,I4,I5,V3,V5,V9,V10
 T4|.|Connect downloaded-file validation to `AmexStatement`; make a focused parser compatibility edit only if T1 proves it necessary; print the existing loader handoff command|C6,C7,I6,I7,I8,V4,V6
