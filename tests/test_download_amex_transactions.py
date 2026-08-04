@@ -12,6 +12,8 @@ from scripts.download_amex_transactions import (
     validate_download,
 )
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
 
 class TestDownloadAmexTransactions(unittest.TestCase):
     def test_required_cli_arguments(self) -> None:
@@ -53,10 +55,7 @@ class TestDownloadAmexTransactions(unittest.TestCase):
     def test_v11_validate_csv_download_and_loader_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "activity export.csv"
-            path.write_text(
-                "Date,Date Processed,Description,Card Member,Account #,Amount\n"
-                "03 Aug 2026,04 Aug 2026,MERCHANT ONE,TEST USER,12345,12.34\n"
-            )
+            path.write_bytes((FIXTURES / "activity.csv").read_bytes())
 
             validate_download(path)
 
