@@ -19,7 +19,7 @@ C10|Use local Playwright only. No Browserbase, remote browser, or hosted browser
 
 ## §I
 
-I1|CLI|`uv run python scripts/download_amex_transactions.py --output-dir <directory> --database <finance|parents_finance>`; `--database` is required and selected by the user.
+I1|CLI|`uv run python -m scripts.download_amex_transactions --output-dir <directory> --database <finance|parents_finance>`; `--database` is required and selected by the user.
 I2|Auth|Launch local headed Chromium at `https://www.americanexpress.com/en-ca/account/login/` with a dedicated user-data directory outside the repo. Wait for the user to finish login/MFA and reach an authenticated account landing state; automation then navigates to statements.
 I3|Amex flow|Follow the official Online Services path: `Statement` -> `Export Statement Data` -> select the transaction data type -> download. Prefer role, label, and visible-text locators over brittle CSS selectors.
 I4|Card|Use the account's sole Amex card. Exit with an actionable error if the account later exposes zero or multiple cards.
@@ -43,18 +43,20 @@ V8|Automated tests make no network request to Amex and require no user account.
 V9|Repeated runs never silently replace an existing statement file.
 V10|Browser process, profile, authenticated session, and downloaded files remain on the user's machine; no remote automation service receives them.
 V11|`AmexStatement` maps `Date`, `Description`, and `Amount` by header name for authenticated CSV and Excel exports; physical column positions do not change standardized output.
+V12|The downloader runs as the `scripts.download_amex_transactions` module so repository imports resolve without `sys.path` mutation.
 
 ## §T
 
 id|status|goal|cites
 T1|x|Run one user-supervised authenticated discovery session; confirm sole-card statement navigation, offered export formats, and downloaded schema without capturing secrets|C1,C2,C3,I3,I4,I6
 T2|x|Add optional local Playwright dependency, dedicated-profile defaults outside the repo, and ignore rules for any local browser/download artifacts|C3,C4,C10,I2,I9,V1,V2,V7,V10
-T3|x|Implement the local headed Amex downloader, manual-auth wait, resilient statement navigation, download capture, safe naming, collision handling, timeout, and cleanup|C2,C5,C10,I2,I3,I4,I5,V3,V5,V9,V10
+T3|x|Implement the local headed Amex downloader, manual-auth wait, resilient statement navigation, download capture, safe naming, collision handling, timeout, and cleanup|C2,C5,C10,I1,I2,I3,I4,I5,V3,V5,V9,V10,V12
 T4|x|Connect downloaded-file validation to `AmexStatement`; make a focused parser compatibility edit only if T1 proves it necessary; print the existing loader handoff command|C6,C7,I6,I7,I8,V4,V6,V11
 T5|x|Add focused tests with local HTML/download fixtures and mocked browser behavior for auth wait, navigation, successful download, collision, timeout, cleanup, and parser validation|C9,V5,V8,V9
-T6|.|Document setup, Chromium install, first login, profile location, normal use, security boundaries, troubleshooting, and the manual authenticated acceptance test|C2,C3,C4,C5,I9,V1,V2,V3,V7
+T6|x|Document setup, Chromium install, first login, profile location, normal use, security boundaries, troubleshooting, and the manual authenticated acceptance test|C2,C3,C4,C5,I9,V1,V2,V3,V7
 
 ## §B
 
 id|date|cause|fix
 B1|2026-08-03|Authenticated Excel export moved `Description` and `Amount`, but parser used fixed column positions|V11
+B2|2026-08-03|Direct execution from `scripts/` excluded repository modules from Python's import path|V12

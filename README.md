@@ -29,6 +29,78 @@ load pre-categorized excel transactions:
 uv run python load-excel-transactions.py --filepath <path_to_excel>
 ```
 
+## download Amex Canada transactions
+
+Install the optional browser dependency and its Chromium binary once:
+
+```bash
+uv sync --extra browser --group dev
+uv run --extra browser playwright install chromium
+```
+
+Download the latest statement activity without loading it into PostgreSQL:
+
+```bash
+uv run python -m scripts.download_amex_transactions \
+  --output-dir ~/Downloads/amex \
+  --database finance
+```
+
+Use `--database parents_finance` when that is the intended loader target. The
+database argument is required only to produce the correct handoff command; the
+downloader never connects to PostgreSQL or runs the loader.
+
+The command opens a visible local Chromium window. On the first run, complete
+Amex login, MFA, and any CAPTCHA manually. The approved session is retained in a
+dedicated profile at:
+
+```text
+~/.local/share/mypersonalfinance/amex-browser-profile
+```
+
+After authentication, automation navigates through `Statement` ->
+`Export Statement Data`, selects CSV, downloads the file, validates it through
+`AmexStatement`, and prints the exact `load-transactions.py` command. Run that
+printed command separately when ready to load the transactions.
+
+Security boundaries:
+
+- Never pass Amex credentials or MFA secrets through CLI arguments, environment
+  variables, or repository configuration.
+- Browser profile, cookies, statement data, screenshots, and traces stay local
+  and must not be committed.
+- Keep `--output-dir` outside the repository. Existing files are never silently
+  overwritten.
+- Authentication and security challenges always require user action; the tool
+  does not bypass Amex controls or use a remote browser service.
+
+Troubleshooting:
+
+- `Playwright is not installed`: rerun both installation commands above.
+- Authentication timeout: rerun the command and finish login/MFA within five
+  minutes.
+- Missing `Statement`, `Export Statement Data`, CSV, or `Download`: Amex likely
+  changed the page; stop and update the locators before retrying.
+- Zero or multiple cards: this workflow supports an account with exactly one
+  Amex card.
+- Existing or stale partial file: choose another output directory or move the
+  named file before retrying. The downloader will not overwrite it.
+- Parser validation failure: retain the completed export locally and update
+  `AmexStatement` for the observed schema; do not load the file first.
+
+Manual authenticated acceptance test:
+
+1. Run the downloader with an empty output directory and the intended database.
+2. Complete login/MFA and confirm Chromium stays visible throughout the run.
+3. Confirm automation opens statement export, selects CSV, and downloads one
+   complete file.
+4. Confirm the output file parses to exactly `date`, `merchant`, `cost`, and
+   `cc_category`.
+5. Confirm the printed loader command contains the saved path and selected
+   database but is not executed automatically.
+6. Run the downloader again with the same statement filename and confirm it
+   refuses to overwrite the first file.
+
 # custom packages:
 - custom version of https://github.com/ImranR98/Wealthsimpleton that has been modified to be a pip-installable package
 - `uv` resolves `wealthsimpleton` from the local `../Wealthsimpleton` checkout

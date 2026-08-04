@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
+from subprocess import run
+import sys
 from unittest.mock import MagicMock, Mock
 
 from scripts.download_amex_transactions import (
@@ -16,6 +18,17 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestDownloadAmexTransactions(unittest.TestCase):
+    def test_v12_module_entrypoint_resolves_repository_imports(self) -> None:
+        result = run(
+            [sys.executable, "-m", "scripts.download_amex_transactions", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--database {finance,parents_finance}", result.stdout)
+
     def test_required_cli_arguments(self) -> None:
         args = parse_args(
             ["--output-dir", "/tmp/amex", "--database", "parents_finance"]
