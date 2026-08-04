@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from config import AMEX_BROWSER_PROFILE_DIR
+from scripts.download_amex_transactions import AMEX_BROWSER_PROFILE_DIR
 
 
 class TestAmexBrowserConfig(unittest.TestCase):

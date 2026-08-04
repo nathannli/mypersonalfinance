@@ -1,12 +1,6 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
-
-
-AMEX_BROWSER_PROFILE_DIR = (
-    Path.home() / ".local" / "share" / "mypersonalfinance" / "amex-browser-profile"
-)
 
 
 class Config:
