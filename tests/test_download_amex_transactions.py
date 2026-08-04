@@ -38,7 +38,9 @@ class TestDownloadAmexTransactions(unittest.TestCase):
 
     @patch("scripts.download_amex_transactions.subprocess.run")
     def test_osascript_error_is_actionable(self, run: MagicMock) -> None:
-        run.return_value = MagicMock(returncode=1, stderr="Apple Events disabled", stdout="")
+        run.return_value = MagicMock(
+            returncode=1, stderr="Apple Events disabled", stdout=""
+        )
 
         with self.assertRaisesRegex(RuntimeError, "Apple Events disabled"):
             run_osascript("return true")

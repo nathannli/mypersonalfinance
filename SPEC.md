@@ -68,3 +68,4 @@ B3|2026-08-03|Amex login stalled in every Playwright-controlled browser, includi
 B4|2026-08-03|Synthetic DOM click closed the export modal but Chrome created no download|V14
 B5|2026-08-03|Chrome AppleScript child process hung indefinitely, bypassing workflow polling timeouts|V15
 B6|2026-08-03|Authentication detection returned the first public Amex tab and ignored an existing authenticated activity tab|V16
+B7|2026-08-03|Local commit discarded the enforced formatter's output, so CI reproduced the same formatting drift|Existing `ruff-format` pre-commit check

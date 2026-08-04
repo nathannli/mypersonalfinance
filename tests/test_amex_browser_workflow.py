@@ -16,15 +16,21 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         for label in ("Card", "Statement", "Export Statement Data", "CSV", "Download"):
             self.assertIn(label, html)
 
-    @patch.object(downloader, "find_amex_url", return_value=downloader.AUTHENTICATED_URL)
-    def test_wait_for_authentication_reuses_normal_chrome(self, find_url: MagicMock) -> None:
+    @patch.object(
+        downloader, "find_amex_url", return_value=downloader.AUTHENTICATED_URL
+    )
+    def test_wait_for_authentication_reuses_normal_chrome(
+        self, find_url: MagicMock
+    ) -> None:
         with patch.object(downloader.subprocess, "run") as run:
             downloader.wait_for_authentication()
 
         find_url.assert_called_once_with()
         run.assert_not_called()
 
-    @patch.object(downloader, "run_osascript", return_value=downloader.AUTHENTICATED_URL)
+    @patch.object(
+        downloader, "run_osascript", return_value=downloader.AUTHENTICATED_URL
+    )
     def test_v16_authenticated_tab_has_priority(self, run_osascript: MagicMock) -> None:
         self.assertEqual(downloader.find_amex_url(), downloader.AUTHENTICATED_URL)
 
@@ -43,7 +49,9 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         self.assertIn('const expected = \\"Statement\\"', script)
 
     @patch.object(downloader, "execute_chrome_js", return_value="2")
-    def test_multiple_cards_exit_with_actionable_error(self, execute_js: MagicMock) -> None:
+    def test_multiple_cards_exit_with_actionable_error(
+        self, execute_js: MagicMock
+    ) -> None:
         with self.assertRaisesRegex(RuntimeError, "Expected one Amex card; found 2"):
             downloader.ensure_single_card()
 

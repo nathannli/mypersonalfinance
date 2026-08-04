@@ -39,7 +39,9 @@ def run_osascript(script: str, operation: str = "control Chrome") -> str:
             timeout=5,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Chrome AppleScript timed out while trying to {operation}") from exc
+        raise RuntimeError(
+            f"Chrome AppleScript timed out while trying to {operation}"
+        ) from exc
     if result.returncode:
         detail = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(f"Chrome AppleScript failed: {detail}")
@@ -110,13 +112,10 @@ def wait_for_authentication() -> None:
     current_url = find_amex_url()
     if current_url and current_url.startswith(AUTHENTICATED_URL):
         return
-    subprocess.run(
-        ["open", "-a", "Google Chrome", LOGIN_URL], check=True, timeout=10
-    )
+    subprocess.run(["open", "-a", "Google Chrome", LOGIN_URL], check=True, timeout=10)
     print("Complete Amex login, MFA, and any security challenge in Chrome.")
     wait_until(
-        lambda: (url := find_amex_url())
-        and url.startswith(AUTHENTICATED_URL),
+        lambda: (url := find_amex_url()) and url.startswith(AUTHENTICATED_URL),
         "an authenticated Amex account landing page",
         AUTH_TIMEOUT_SECONDS,
     )
