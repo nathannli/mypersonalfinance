@@ -31,11 +31,15 @@ uv run python load-excel-transactions.py --filepath <path_to_excel>
 
 ## download Amex Canada transactions
 
-Requirements: macOS and installed Google Chrome. In Chrome, enable `View` ->
-`Developer` -> `Allow JavaScript from Apple Events`. Grant Accessibility access
-to the terminal application running this command so it can perform the final
-trusted download click. No browser-automation package or separate browser profile
-is used.
+Requirements: the Browse CLI and a `BROWSERBASE_API_KEY` exported in the shell.
+The command creates a named Browserbase remote session and prints its live-view
+URL so you can complete login, MFA, and any CAPTCHA/security challenge.
+
+For Fish users, load the existing secrets file before running the command:
+
+```fish
+source ~/.config/fish/secrets.fish
+```
 
 Download the latest statement activity without loading it into PostgreSQL:
 
@@ -49,36 +53,34 @@ Use `--database parents_finance` when that is the intended loader target. The
 database argument is required only to produce the correct handoff command; the
 downloader never connects to PostgreSQL or runs the loader.
 
-The command opens Amex in your normal Google Chrome profile, preserving existing
-password-manager extensions and approved sessions. On the first run, complete
-Amex login, MFA, and any CAPTCHA manually.
+The command opens Amex in Browserbase. On the first run, complete Amex login,
+MFA, and any CAPTCHA manually in the printed live session.
 
 After authentication, automation navigates through `Statement` ->
-`Export Statement Data` -> `Go to Statement Activity`, opens `Download`, selects
-CSV, performs a native click on the modal download link, detects the completed
-file in Chrome's Downloads directory, moves it into `--output-dir`, validates it
-through `AmexStatement`, and prints the exact `load-transactions.py` command. Run
-that printed command separately when ready to load the transactions. Keep Chrome
-focused and do not move or resize its window from CSV selection until the download
-starts; the final click uses the link's current screen coordinates.
+`Export Statement Data` -> `Go to Statement Activity`, dismisses the first-run
+welcome dialog when present, opens `Download`, selects CSV, retrieves the
+Browserbase session download archive, moves the single CSV into `--output-dir`,
+validates it through `AmexStatement`, and prints the exact
+`load-transactions.py` command. Run that printed command separately when ready
+to load the transactions.
 
 Security boundaries:
 
-- Never pass Amex credentials or MFA secrets through CLI arguments, environment
-  variables, or repository configuration.
-- Browser profile, cookies, statement data, screenshots, and traces stay local;
-  the tool never copies browser state and none of these artifacts may be committed.
+- Never pass Amex credentials or MFA secrets through CLI arguments or repository
+  configuration. `BROWSERBASE_API_KEY` is required only to start the remote session.
+- Browserbase session state and statement data are used only for this supervised
+  run; none of these artifacts may be committed.
 - Keep `--output-dir` outside the repository. Existing files are never silently
   overwritten.
 - Authentication and security challenges always require user action; the tool
-  does not bypass Amex controls or use Playwright or a remote browser service.
+  does not bypass Amex controls or use Playwright.
 
 Troubleshooting:
 
-- Apple Events error: enable `Allow JavaScript from Apple Events` in Chrome.
-- Native click error: grant Accessibility permission to the terminal application.
-- Missing download after CSV selection: keep Chrome focused and its window unmoved
-  during the native click, then retry.
+- Missing `BROWSERBASE_API_KEY`: export it before running the command, for example
+  by sourcing the shell secrets file that defines it.
+- Missing download after CSV selection: confirm the Browserbase session download
+  archive contains exactly one CSV, then retry with a fresh session.
 - Authentication timeout: rerun the command and finish login/MFA within five
   minutes.
 - Missing `Statement`, `Export Statement Data`, CSV, or `Download`: Amex likely
@@ -93,7 +95,7 @@ Troubleshooting:
 Manual authenticated acceptance test:
 
 1. Run the downloader with an empty output directory and the intended database.
-2. Complete login/MFA and confirm Google Chrome stays visible throughout the run.
+2. Complete login/MFA in the Browserbase live session.
 3. Confirm automation opens statement export, selects CSV, and downloads one
    complete file.
 4. Confirm the output file parses to exactly `date`, `merchant`, `cost`, and

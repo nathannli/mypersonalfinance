@@ -33,6 +33,33 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         find_url.assert_called_once_with()
         run.assert_not_called()
 
+    @patch.object(downloader.time, "sleep")
+    @patch.object(
+        downloader,
+        "browse_url",
+        side_effect=[
+            "https://www.americanexpress.com/en-ca/account/login/",
+            f"{downloader.AUTHENTICATED_URL}dashboard",
+        ],
+    )
+    @patch.object(
+        downloader,
+        "browse_open",
+        return_value=("browserbase-session", "https://browserbase.test/session"),
+    )
+    def test_browserbase_auth_waits_for_authenticated_url(
+        self,
+        browse_open: MagicMock,
+        browse_url: MagicMock,
+        sleep: MagicMock,
+    ) -> None:
+        with patch.dict("os.environ", {"BROWSERBASE_API_KEY": "test-key"}):
+            session_id = downloader.wait_for_browserbase_authentication()
+
+        self.assertEqual(session_id, "browserbase-session")
+        browse_open.assert_called_once_with()
+        self.assertEqual(browse_url.call_count, 2)
+
     @patch.object(
         downloader, "run_osascript", return_value=downloader.AUTHENTICATED_URL
     )
@@ -214,38 +241,32 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         self.assertEqual(df.item(0, "merchant"), "MERCHANT ONE")
 
     @patch.object(downloader, "validate_download")
-    @patch.object(downloader, "move_download")
-    @patch.object(downloader, "wait_for_download")
-    @patch.object(downloader, "native_click")
-    @patch.object(downloader, "select_csv_and_get_download_point", return_value=(1, 2))
-    @patch.object(downloader, "chrome_download_dir")
-    @patch.object(downloader, "navigate_to_export")
-    @patch.object(downloader, "wait_for_authentication")
-    def test_run_orchestrates_normal_chrome_without_loading_database(
+    @patch.object(downloader, "browserbase_download")
+    @patch.object(downloader, "select_csv_browserbase")
+    @patch.object(downloader, "navigate_to_export_browserbase")
+    @patch.object(
+        downloader, "wait_for_browserbase_authentication", return_value="session-id"
+    )
+    def test_run_orchestrates_browserbase_without_loading_database(
         self,
         wait_for_authentication: MagicMock,
         navigate_to_export: MagicMock,
-        chrome_download_dir: MagicMock,
-        select_point: MagicMock,
-        native_click: MagicMock,
-        wait_for_download: MagicMock,
-        move_download: MagicMock,
+        select_csv: MagicMock,
+        browserbase_download: MagicMock,
         validate_download: MagicMock,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            chrome_download_dir.return_value = root
-            downloaded = root / "activity.csv"
-            wait_for_download.return_value = downloaded
             saved = root / "output" / "activity.csv"
-            move_download.return_value = saved
+            browserbase_download.return_value = saved
 
             result = downloader.run(root / "output", "finance")
 
         self.assertEqual(result, saved)
         wait_for_authentication.assert_called_once_with()
         navigate_to_export.assert_called_once_with()
-        native_click.assert_called_once_with(1, 2)
+        select_csv.assert_called_once_with()
+        browserbase_download.assert_called_once_with("session-id", root / "output")
         validate_download.assert_called_once_with(saved)
 
 

@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-"""Download Amex Canada activity through the user's normal Google Chrome."""
+"""Download Amex Canada activity through a supervised Browserbase session."""
 
 import argparse
 import json
+import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
+from zipfile import ZipFile
 
 LOGIN_URL = "https://www.americanexpress.com/en-ca/account/login/"
 AUTHENTICATED_URL = "https://global.americanexpress.com/"
 AUTH_TIMEOUT_SECONDS = 5 * 60
 ACTION_TIMEOUT_SECONDS = 30
+BROWSE_SESSION = "mypersonalfinance-amex"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -26,6 +31,112 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--database", choices=("finance", "parents_finance"), required=True
     )
     return parser.parse_args(argv)
+
+
+def run_browse(
+    args: list[str],
+    *,
+    timeout: int = ACTION_TIMEOUT_SECONDS,
+    session: str = BROWSE_SESSION,
+    remote: bool = True,
+) -> str:
+    if not os.environ.get("BROWSERBASE_API_KEY"):
+        raise RuntimeError(
+            "BROWSERBASE_API_KEY is required; export it before starting Browserbase"
+        )
+    command = ["browse", *args]
+    if remote:
+        command.extend(["--remote", "--session", session])
+    try:
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Browserbase command timed out: {' '.join(args)}") from exc
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(f"Browserbase command failed: {detail}")
+    return result.stdout
+
+
+def browse_json(output: str) -> dict:
+    match = re.search(r"(?m)^\{.*\}\s*$", output, re.DOTALL)
+    if not match:
+        raise RuntimeError("Browserbase returned an unreadable response")
+    return json.loads(match.group(0))
+
+
+def browse_open() -> tuple[str, str]:
+    response = browse_json(
+        run_browse(["open", LOGIN_URL], timeout=ACTION_TIMEOUT_SECONDS)
+    )
+    session_id = response.get("browserbaseSessionId")
+    session_url = response.get("browserbaseSessionUrl")
+    if not session_id or not session_url:
+        raise RuntimeError("Browserbase did not return a session or live-view URL")
+    return session_id, session_url
+
+
+def browse_url() -> str:
+    return run_browse(["get", "url"]).strip()
+
+
+def browse_click_xpath(xpath: str) -> None:
+    run_browse(["click", xpath])
+
+
+def browse_eval(expression: str) -> str:
+    return run_browse(["eval", expression]).strip()
+
+
+def wait_for_browserbase_url(fragment: str, message: str) -> str:
+    def matching_url() -> str | None:
+        current = browse_url()
+        return current if fragment in current else None
+
+    return wait_until(
+        matching_url,
+        message,
+    )
+
+
+def browserbase_download(session_id: str, output_dir: Path) -> Path:
+    output_dir = output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="amex-browserbase-") as temporary:
+        archive = Path(temporary) / "downloads.zip"
+        run_browse(
+            [
+                "cloud",
+                "sessions",
+                "downloads",
+                "get",
+                session_id,
+                "--output",
+                str(archive),
+            ],
+            timeout=ACTION_TIMEOUT_SECONDS,
+            remote=False,
+        )
+        if not archive.exists():
+            raise RuntimeError("Browserbase returned no download archive")
+        with ZipFile(archive) as zip_file:
+            csv_names = [
+                name
+                for name in zip_file.namelist()
+                if name.lower().endswith(".csv") and not name.endswith("/")
+            ]
+            if len(csv_names) != 1:
+                raise RuntimeError(
+                    f"Expected exactly one CSV in Browserbase downloads; found {len(csv_names)}"
+                )
+            downloaded = Path(temporary) / sanitize_filename(Path(csv_names[0]).name)
+            downloaded.write_bytes(zip_file.read(csv_names[0]))
+            return move_download(downloaded, output_dir)
 
 
 def run_osascript(script: str, operation: str = "control Chrome") -> str:
@@ -121,6 +232,23 @@ def wait_for_authentication() -> None:
     )
 
 
+def wait_for_browserbase_authentication() -> str:
+    session_id, session_url = browse_open()
+    print(f"Browserbase live session: {session_url}", flush=True)
+    print("Complete Amex login, MFA, and any security challenge in that session.")
+
+    def authenticated_url() -> str | None:
+        current = browse_url()
+        return current if current.startswith(AUTHENTICATED_URL) else None
+
+    wait_until(
+        authenticated_url,
+        "an authenticated Amex account landing page in Browserbase",
+        AUTH_TIMEOUT_SECONDS,
+    )
+    return session_id
+
+
 def click_visible(text: str) -> None:
     encoded_text = json.dumps(text)
     result = execute_chrome_js(
@@ -203,6 +331,37 @@ def navigate_to_export() -> None:
     )
 
 
+def navigate_to_export_browserbase() -> None:
+    url = browse_url()
+    ensure_single_card_browserbase()
+    if urlparse(url).path == "/activity":
+        return
+    browse_click_xpath('//*[self::a or self::button][normalize-space(.)="Statement"]')
+    browse_click_xpath('//a[normalize-space(.)="Export Statement Data"]')
+    wait_for_browserbase_url(
+        "/activity/statements", "Amex statements page in Browserbase"
+    )
+    browse_click_xpath('//a[normalize-space(.)="Go to Statement Activity"]')
+    wait_for_browserbase_url("/activity", "Amex statement activity page in Browserbase")
+    try:
+        browse_click_xpath('//button[normalize-space(.)="Explore On My Own"]')
+    except RuntimeError:
+        pass
+
+
+def ensure_single_card_browserbase() -> None:
+    count = (
+        browse_eval(
+            "String(new Set([...document.querySelectorAll('a[href]')].map(a => "
+            "{try{return new URL(a.href).searchParams.get('account_key')}catch(_){return null}}).filter(Boolean)).size)"
+        )
+        .splitlines()[-1]
+        .strip()
+    )
+    if count != "1":
+        raise RuntimeError(f"Expected one Amex card; found {count}")
+
+
 def select_csv_and_get_download_point() -> tuple[int, int]:
     csv_available = execute_chrome_js(
         "String(Boolean(document.querySelector('input[type=radio][value=csv]')))"
@@ -241,6 +400,23 @@ def select_csv_and_get_download_point() -> tuple[int, int]:
         raise RuntimeError("Amex page changed: CSV download link is unavailable")
     point = json.loads(coordinates)
     return point["x"], point["y"]
+
+
+def select_csv_browserbase() -> None:
+    browse_click_xpath('//*[self::a or self::button][normalize-space(.)="Download"]')
+    wait_until(
+        lambda: (
+            browse_eval(
+                "String(Boolean(document.querySelector('input[type=radio][value=csv]')))"
+            )
+            .splitlines()[-1]
+            .strip()
+            == "true"
+        ),
+        "Amex CSV export dialog in Browserbase",
+    )
+    browse_click_xpath('input[type="radio"][value="csv"]')
+    browse_click_xpath('//a[normalize-space(.)="Download"]')
 
 
 def native_click(x: int, y: int) -> None:
@@ -353,18 +529,14 @@ def loader_command(path: Path, database: str) -> str:
 
 
 def run(output_dir: Path, database: str) -> Path:
-    print("Checking normal Chrome authentication...", flush=True)
-    wait_for_authentication()
+    print("Starting Browserbase authentication session...", flush=True)
+    session_id = wait_for_browserbase_authentication()
     print("Navigating to Amex statement activity...", flush=True)
-    navigate_to_export()
-    download_dir = chrome_download_dir()
-    before = set(download_dir.iterdir())
+    navigate_to_export_browserbase()
     print("Selecting CSV export...", flush=True)
-    x, y = select_csv_and_get_download_point()
-    print("Clicking Chrome download control...", flush=True)
-    native_click(x, y)
-    print("Waiting for Chrome download...", flush=True)
-    saved_path = move_download(wait_for_download(download_dir, before), output_dir)
+    select_csv_browserbase()
+    print("Retrieving Browserbase download...", flush=True)
+    saved_path = browserbase_download(session_id, output_dir)
     validate_download(saved_path)
     print(f"Downloaded Amex statement: {saved_path}")
     print(f"Load manually: {loader_command(saved_path, database)}")
