@@ -181,9 +181,9 @@ def ensure_single_card() -> None:
 
 def navigate_to_export() -> None:
     pathname = execute_chrome_js("location.pathname")
+    ensure_single_card()
     if pathname == "/activity":
         return
-    ensure_single_card()
     click_visible("Statement")
     wait_until(
         lambda: (click_visible("Export Statement Data"), True)[1],
@@ -224,7 +224,8 @@ def select_csv_and_get_download_point() -> tuple[int, int]:
 (() => {
   const csv = document.querySelector('input[type=radio][value=csv]');
   csv.click();
-  const link = [...document.querySelectorAll('a')].find(element =>
+  const dialog = csv.closest('[role=dialog]');
+  const link = dialog && [...dialog.querySelectorAll('a')].find(element =>
     element.textContent.trim() === 'Download' && element.offsetParent !== null
   );
   if (!link || !csv.checked) return '';
@@ -311,9 +312,16 @@ def move_download(download: Path, output_dir: Path) -> Path:
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     destination = output_dir / sanitize_filename(download.name)
-    if destination.exists():
+    try:
+        with destination.open("xb") as reserved, download.open("rb") as source:
+            shutil.copyfileobj(source, reserved)
+    except FileExistsError:
         raise FileExistsError(f"Refusing to overwrite existing file: {destination}")
-    return Path(shutil.move(str(download), destination))
+    except OSError:
+        destination.unlink(missing_ok=True)
+        raise
+    download.unlink()
+    return destination
 
 
 def validate_download(path: Path) -> None:

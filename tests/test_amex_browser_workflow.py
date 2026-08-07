@@ -13,8 +13,13 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
     def test_local_html_fixture_documents_accessible_controls(self) -> None:
         html = (FIXTURES / "amex_statement_page.html").read_text()
 
-        for label in ("Card", "Statement", "Export Statement Data", "CSV", "Download"):
-            self.assertIn(label, html)
+        self.assertIn('<select id="card">', html)
+        self.assertIn('<a href="/statement">Statement</a>', html)
+        self.assertIn("<button>Export Statement Data</button>", html)
+        self.assertIn('<a href="/activity">Go to Statement Activity</a>', html)
+        self.assertIn('<div role="dialog" aria-modal="true">', html)
+        self.assertIn('<input type="radio" name="format" value="csv">', html)
+        self.assertIn('<a href="/download">Download</a>', html)
 
     @patch.object(
         downloader, "find_amex_url", return_value=downloader.AUTHENTICATED_URL
@@ -81,6 +86,16 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         )
         self.assertEqual(wait_until.call_count, 4)
 
+    @patch.object(downloader, "ensure_single_card")
+    @patch.object(downloader, "execute_chrome_js", return_value="/activity")
+    def test_navigation_checks_card_when_already_on_activity(
+        self, execute_js: MagicMock, ensure_single_card: MagicMock
+    ) -> None:
+        downloader.navigate_to_export()
+
+        execute_js.assert_called_once_with("location.pathname")
+        ensure_single_card.assert_called_once_with()
+
     @patch.object(downloader, "click_visible")
     @patch.object(downloader, "wait_until")
     @patch.object(downloader, "execute_chrome_js")
@@ -94,7 +109,11 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         self.assertEqual(point, (967, 887))
         click_visible.assert_not_called()
         wait_until.assert_called_once()
-        self.assertIn("getBoundingClientRect", execute_js.call_args.args[0])
+        script = execute_js.call_args.args[0]
+        self.assertIn("csv.closest('[role=dialog]')", script)
+        self.assertIn("dialog.querySelectorAll('a')", script)
+        self.assertIn("element.offsetParent !== null", script)
+        self.assertIn("getBoundingClientRect", script)
 
     @patch.object(downloader.subprocess, "run")
     def test_v14_native_click_uses_core_graphics(self, run: MagicMock) -> None:
@@ -120,6 +139,23 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
             self.assertEqual(saved.name, "activity_1_.csv")
             self.assertTrue(saved.exists())
             self.assertFalse(download.exists())
+
+    @patch.object(downloader.shutil, "copyfileobj", side_effect=OSError("copy failed"))
+    def test_failed_download_copy_removes_reserved_destination(
+        self, copyfileobj: MagicMock
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            download = root / "activity.csv"
+            download.write_text("source")
+            output = root / "output"
+
+            with self.assertRaisesRegex(OSError, "copy failed"):
+                downloader.move_download(download, output)
+
+            copyfileobj.assert_called_once()
+            self.assertTrue(download.exists())
+            self.assertFalse((output / "activity.csv").exists())
 
     def test_collision_refuses_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -160,6 +196,22 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         df = AmexStatement(str(path)).get_df()
         self.assertEqual(df.columns, ["date", "merchant", "cost", "cc_category"])
         self.assertEqual(df.height, 1)
+
+    def test_v11_normalizes_amex_csv_text_before_parsing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "activity.csv"
+            path.write_text(
+                "Date,Description,Amount\n"
+                "\xa003 Aug 2026\xa0,\xa0MERCHANT ONE\xa0,\xa0$12.34\xa0\n"
+                "04 Aug 2026,PAYMENT RECEIVED\xa0- THANK YOU,-12.34\n"
+            )
+
+            from sources.csv.amex import AmexStatement
+
+            df = AmexStatement(str(path)).get_df()
+
+        self.assertEqual(df.height, 1)
+        self.assertEqual(df.item(0, "merchant"), "MERCHANT ONE")
 
     @patch.object(downloader, "validate_download")
     @patch.object(downloader, "move_download")

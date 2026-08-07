@@ -76,6 +76,16 @@ class AmexStatement(FileBasedCardStatement):
 
     @staticmethod
     def _standardize(df: pl.DataFrame) -> pl.DataFrame:
+        df = df.with_columns(
+            [
+                pl.col(column)
+                .str.replace_all("\xa0", " ")
+                .str.strip_chars()
+                .alias(column)
+                for column in ("date", "merchant", "cost")
+            ]
+        )
+
         # Add a dummy cc_category column with None values
         df = df.with_columns(pl.lit(None).alias("cc_category"))
 
