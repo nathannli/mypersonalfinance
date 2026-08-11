@@ -31,9 +31,11 @@ uv run python load-excel-transactions.py --filepath <path_to_excel>
 
 ## download Amex Canada transactions
 
-Requirements: the Browse CLI and a `BROWSERBASE_API_KEY` exported in the shell.
-The command creates a named Browserbase remote session and prints its live-view
-URL so you can complete login, MFA, and any CAPTCHA/security challenge.
+Default route requires Browse CLI and `BROWSERBASE_API_KEY`. BrowserOS route
+requires BrowserOS neo running locally with its MCP endpoint at
+`BROWSEROS_MCP_URL` (default: `http://127.0.0.1:9010/mcp`). Both routes use
+local `.env` values for `AMEX_USER` and `AMEX_PASSWORD`; grant Full Disk Access
+to terminal app so `macos-messages` can read incoming Amex SMS code.
 
 For Fish users, load the existing secrets file before running the command:
 
@@ -53,8 +55,26 @@ Use `--database parents_finance` when that is the intended loader target. The
 database argument is required only to produce the correct handoff command; the
 downloader never connects to PostgreSQL or runs the loader.
 
-The command opens Amex in Browserbase. On the first run, complete Amex login,
-MFA, and any CAPTCHA manually in the printed live session.
+Set this local `.env` value to use BrowserOS neo instead of Browserbase:
+
+```sh
+AMEX_BROWSER_BACKEND=browseros
+```
+
+Then run:
+
+```bash
+uv run python -m scripts.download_amex_transactions \
+  --output-dir ~/Downloads/amex \
+  --database finance \
+  --months latest 2026-07 2026-06 2026-05
+```
+
+Browserbase remains default. `AMEX_BROWSER_BACKEND=browseros` opens a BrowserOS neo task-owned tab,
+reuses its authenticated profile when available, and otherwise fills
+`AMEX_USER`/`AMEX_PASSWORD` from `.env`, selects SMS delivery, retrieves recent
+Amex SMS code through `macos-messages`, and submits it. CAPTCHA and unexpected
+security challenges stop with an actionable error.
 
 After authentication, automation navigates through `Statement` ->
 `Export Statement Data` -> `Go to Statement Activity`, dismisses the first-run
@@ -66,10 +86,12 @@ to load the transactions.
 
 Security boundaries:
 
-- Never pass Amex credentials or MFA secrets through CLI arguments or repository
-  configuration. `BROWSERBASE_API_KEY` is required only to start the remote session.
-- Browserbase session state and statement data are used only for this supervised
-  run; none of these artifacts may be committed.
+- Amex credentials are read from existing `.env` values and entered only into the
+  live Amex login form. Recent Amex MFA codes are used only in memory for the
+  Browserbase form; credentials and codes are never printed or passed as CLI
+  arguments. `BROWSERBASE_API_KEY` is required only to start the remote session.
+- Browserbase and BrowserOS session state plus statement data are used only for
+  this run; none of these artifacts may be committed.
 - Keep `--output-dir` outside the repository. Existing files are never silently
   overwritten.
 - Authentication and security challenges always require user action; the tool
@@ -79,6 +101,11 @@ Troubleshooting:
 
 - Missing `BROWSERBASE_API_KEY`: export it before running the command, for example
   by sourcing the shell secrets file that defines it.
+- BrowserOS endpoint unavailable: start BrowserOS neo and confirm
+  `BROWSEROS_MCP_URL` points to its local MCP endpoint. The BrowserOS route
+  starts `BrowserOS neo` automatically and waits up to 30 seconds for endpoint.
+- `macos-messages` cannot read SMS: grant Full Disk Access to the terminal app in
+  macOS System Settings, then rerun.
 - Missing download after CSV selection: confirm the Browserbase session download
   archive contains exactly one CSV, then retry with a fresh session.
 - Authentication timeout: rerun the command and finish login/MFA within five

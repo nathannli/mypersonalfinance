@@ -35,6 +35,35 @@ class TestDownloadAmexTransactions(unittest.TestCase):
         self.assertEqual(args.output_dir, Path("/tmp/amex"))
         self.assertEqual(args.database, "parents_finance")
 
+    def test_statement_months_are_parsed(self) -> None:
+        args = parse_args(
+            [
+                "--output-dir",
+                "/tmp/amex",
+                "--database",
+                "finance",
+                "--months",
+                "2026-05",
+                "2026-06",
+                "latest",
+            ]
+        )
+
+        self.assertEqual(args.months, ["2026-05", "2026-06", "latest"])
+
+    def test_browser_backend_defaults_to_browserbase(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(downloader.amex_browser_backend(), "browserbase")
+
+    def test_browser_backend_accepts_browseros(self) -> None:
+        with patch.dict("os.environ", {"AMEX_BROWSER_BACKEND": "browseros"}):
+            self.assertEqual(downloader.amex_browser_backend(), "browseros")
+
+    def test_browser_backend_rejects_unknown_value(self) -> None:
+        with patch.dict("os.environ", {"AMEX_BROWSER_BACKEND": "chrome"}):
+            with self.assertRaisesRegex(RuntimeError, "AMEX_BROWSER_BACKEND"):
+                downloader.amex_browser_backend()
+
     def test_sanitize_filename_removes_path_and_unsafe_characters(self) -> None:
         self.assertEqual(sanitize_filename("../../activity (1).csv"), "activity_1_.csv")
 
@@ -87,6 +116,21 @@ class TestDownloadAmexTransactions(unittest.TestCase):
             self.assertEqual(saved.name, "activity_export.csv")
             self.assertTrue(saved.exists())
         run_browse.assert_called_once()
+
+    def test_browseros_route_returns_bridge_downloads(self) -> None:
+        async def bridge_download(*_args: object) -> dict[str, object]:
+            return {"status": "downloaded", "paths": ["/tmp/amex-2026-07.csv"]}
+
+        with (
+            patch(
+                "scripts.amex_browseros_bridge.run_download",
+                side_effect=bridge_download,
+            ),
+            patch.dict("os.environ", {"AMEX_BROWSER_BACKEND": "browseros"}),
+        ):
+            saved = downloader.run(Path("/tmp/amex"), "finance", ["2026-07"])
+
+        self.assertEqual(saved, [Path("/tmp/amex-2026-07.csv")])
 
 
 if __name__ == "__main__":

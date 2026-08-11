@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -10,6 +11,197 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestAmexBrowserWorkflow(unittest.TestCase):
+    @patch.object(
+        downloader,
+        "run_browse",
+        return_value='{"url": "https://global.americanexpress.com/dashboard"}',
+    )
+    def test_browserbase_extracts_url_from_json(self, run_browse: MagicMock) -> None:
+        self.assertEqual(
+            downloader.browse_url(), "https://global.americanexpress.com/dashboard"
+        )
+        run_browse.assert_called_once_with(["get", "url"])
+
+    @patch.object(downloader.subprocess, "run")
+    def test_browserbase_commands_use_named_remote_session(
+        self, run: MagicMock
+    ) -> None:
+        run.return_value = MagicMock(
+            returncode=0, stderr="", stdout='{"url": "https://example.com"}'
+        )
+
+        with patch.dict("os.environ", {"BROWSERBASE_API_KEY": "test-key"}):
+            downloader.run_browse(["get", "url"])
+
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                "browse",
+                "get",
+                "url",
+                "--remote",
+                "--session",
+                downloader.BROWSE_SESSION,
+            ],
+        )
+
+    @patch.object(downloader, "run_browse", return_value='{"result": "1"}')
+    def test_browserbase_extracts_evaluation_result_from_json(
+        self, run_browse: MagicMock
+    ) -> None:
+        self.assertEqual(downloader.browse_eval("String(1)"), "1")
+        run_browse.assert_called_once_with(["eval", "String(1)"])
+
+    @patch.object(downloader.time, "sleep")
+    @patch.object(downloader, "dismiss_browserbase_popups")
+    @patch.object(
+        downloader,
+        "browse_url",
+        side_effect=[
+            "https://global.americanexpress.com/activity/statements",
+            "https://global.americanexpress.com/activity",
+        ],
+    )
+    def test_browserbase_waits_for_exact_activity_path(
+        self,
+        browse_url: MagicMock,
+        dismiss_popups: MagicMock,
+        sleep: MagicMock,
+    ) -> None:
+        url = downloader.wait_for_browserbase_url(
+            "/activity", "Amex statement activity page in Browserbase"
+        )
+
+        self.assertEqual(url, "https://global.americanexpress.com/activity")
+        self.assertEqual(browse_url.call_count, 2)
+        self.assertEqual(dismiss_popups.call_count, 2)
+
+    @patch.object(downloader, "browse_eval", return_value="Download")
+    @patch.object(
+        downloader,
+        "browse_url",
+        return_value="https://global.americanexpress.com/activity?days=30",
+    )
+    @patch.object(downloader, "dismiss_browserbase_popups")
+    def test_browserbase_waits_for_statement_activity_page(
+        self,
+        dismiss_popups: MagicMock,
+        browse_url: MagicMock,
+        browse_eval: MagicMock,
+    ) -> None:
+        downloader.wait_for_statement_activity_browserbase()
+
+        dismiss_popups.assert_called_once_with()
+        browse_url.assert_called_once_with()
+        browse_eval.assert_called_once_with("document.body.innerText")
+
+    @patch.object(downloader.subprocess, "run")
+    def test_browserbase_recovers_no_active_page_once(self, run: MagicMock) -> None:
+        run.side_effect = [
+            MagicMock(
+                returncode=1,
+                stderr=downloader.NO_ACTIVE_PAGE_ERROR,
+                stdout="",
+            ),
+            MagicMock(returncode=0, stderr="", stdout=""),
+            MagicMock(
+                returncode=0,
+                stderr="",
+                stdout="https://global.americanexpress.com/dashboard",
+            ),
+        ]
+
+        with patch.dict("os.environ", {"BROWSERBASE_API_KEY": "test-key"}):
+            url = downloader.run_browse(["get", "url"])
+
+        self.assertEqual(url, "https://global.americanexpress.com/dashboard")
+        self.assertEqual(
+            run.call_args_list,
+            [
+                call(
+                    [
+                        "browse",
+                        "get",
+                        "url",
+                        "--remote",
+                        "--session",
+                        downloader.BROWSE_SESSION,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=downloader.ACTION_TIMEOUT_SECONDS,
+                ),
+                call(
+                    [
+                        "browse",
+                        "open",
+                        downloader.AUTHENTICATED_URL,
+                        "--remote",
+                        "--session",
+                        downloader.BROWSE_SESSION,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=downloader.REMOTE_OPEN_TIMEOUT_SECONDS,
+                ),
+                call(
+                    [
+                        "browse",
+                        "get",
+                        "url",
+                        "--remote",
+                        "--session",
+                        downloader.BROWSE_SESSION,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=downloader.ACTION_TIMEOUT_SECONDS,
+                ),
+            ],
+        )
+
+    @patch.object(downloader, "run_browse")
+    def test_browserbase_retries_with_fresh_session_after_daemon_timeout(
+        self, run_browse: MagicMock
+    ) -> None:
+        run_browse.side_effect = [
+            RuntimeError(
+                f"Browserbase command failed: {downloader.DRIVER_DAEMON_TIMEOUT}"
+            ),
+            "",
+            json.dumps(
+                {
+                    "browserbaseSessionId": "fresh-session",
+                    "browserbaseSessionUrl": "https://browserbase.test/fresh-session",
+                }
+            ),
+        ]
+
+        session_id, session_url = downloader.browse_open()
+
+        self.assertEqual(session_id, "fresh-session")
+        self.assertEqual(session_url, "https://browserbase.test/fresh-session")
+        self.assertEqual(
+            run_browse.call_args_list,
+            [
+                call(
+                    ["open", downloader.LOGIN_URL],
+                    timeout=downloader.REMOTE_OPEN_TIMEOUT_SECONDS,
+                ),
+                call(
+                    ["stop", "--force", "--session", downloader.BROWSE_SESSION],
+                    remote=False,
+                ),
+                call(
+                    ["open", downloader.LOGIN_URL],
+                    timeout=downloader.REMOTE_OPEN_TIMEOUT_SECONDS,
+                ),
+            ],
+        )
+
     def test_local_html_fixture_documents_accessible_controls(self) -> None:
         html = (FIXTURES / "amex_statement_page.html").read_text()
 
@@ -47,8 +239,18 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         "browse_open",
         return_value=("browserbase-session", "https://browserbase.test/session"),
     )
+    @patch.object(downloader, "fill_browserbase_credentials")
+    @patch.object(downloader, "browse_click_xpath")
+    @patch.object(downloader, "select_sms_mfa_browserbase")
+    @patch.object(downloader, "submit_sms_mfa_browserbase")
+    @patch.object(downloader, "complete_trust_device_browserbase")
     def test_browserbase_auth_waits_for_authenticated_url(
         self,
+        complete_trust_device: MagicMock,
+        submit_sms: MagicMock,
+        select_sms: MagicMock,
+        browse_click: MagicMock,
+        fill_credentials: MagicMock,
         browse_open: MagicMock,
         browse_url: MagicMock,
         sleep: MagicMock,
@@ -58,7 +260,145 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
 
         self.assertEqual(session_id, "browserbase-session")
         browse_open.assert_called_once_with()
+        fill_credentials.assert_called_once_with()
+        browse_click.assert_called_once_with('//button[normalize-space(.)="Log In"]')
+        select_sms.assert_called_once_with()
+        submit_sms.assert_called_once_with(select_sms.return_value)
+        complete_trust_device.assert_called_once_with()
         self.assertEqual(browse_url.call_count, 2)
+
+    @patch.object(downloader, "browse_fill")
+    def test_browserbase_fills_credentials_from_environment(
+        self, browse_fill: MagicMock
+    ) -> None:
+        with patch.dict(
+            "os.environ",
+            {"AMEX_USER": "test-user", "AMEX_PASSWORD": "test-password"},
+        ):
+            downloader.fill_browserbase_credentials()
+
+        self.assertEqual(
+            browse_fill.call_args_list,
+            [
+                call(
+                    "#eliloUserID",
+                    "test-user",
+                    "AMEX_USER",
+                ),
+                call(
+                    '//input[@type="password"][1]',
+                    "test-password",
+                    "AMEX_PASSWORD",
+                ),
+            ],
+        )
+
+    @patch.object(
+        downloader,
+        "browse_eval",
+        return_value="Select how you'd like to receive your code:",
+    )
+    @patch.object(downloader, "browse_click_xpath")
+    def test_browserbase_selects_sms_mfa(
+        self, browse_click: MagicMock, browse_eval: MagicMock
+    ) -> None:
+        requested_at = downloader.select_sms_mfa_browserbase()
+
+        browse_eval.assert_called_once_with("document.body.innerText")
+        self.assertIsNone(requested_at.tzinfo)
+        self.assertLess(
+            abs(
+                (
+                    requested_at - datetime.now(timezone.utc).replace(tzinfo=None)
+                ).total_seconds()
+            ),
+            1,
+        )
+        self.assertEqual(
+            browse_click.call_args_list,
+            [
+                call('//form//input[@type="radio"][1]'),
+                call('//button[normalize-space(.)="Continue"]'),
+            ],
+        )
+
+    @patch.object(downloader.time, "sleep")
+    @patch.object(downloader.messages, "get_db")
+    def test_browserbase_reads_recent_amex_sms_code(
+        self, get_db: MagicMock, sleep: MagicMock
+    ) -> None:
+        message = MagicMock(is_from_me=False, text="AMEX: your code is 315238")
+        get_db.return_value.chats.return_value = [MagicMock(id=42)]
+        get_db.return_value.messages.return_value = [message]
+
+        code = downloader.wait_for_amex_sms_code(datetime.now())
+
+        self.assertEqual(code, "315238")
+        sleep.assert_called_once_with(downloader.MFA_CODE_INITIAL_DELAY_SECONDS)
+        get_db.return_value.messages.assert_called_once_with(
+            chat_ids=[42],
+            after=unittest.mock.ANY,
+            limit=25,
+            include_unsent=False,
+            include_unknown_senders=True,
+        )
+
+    @patch.object(downloader, "wait_for_amex_sms_code", return_value="315238")
+    @patch.object(downloader, "browse_fill")
+    @patch.object(downloader, "browse_click_xpath")
+    @patch.object(
+        downloader, "browse_eval", return_value="Please enter the verification code"
+    )
+    def test_browserbase_submits_sms_mfa_code(
+        self,
+        browse_eval: MagicMock,
+        browse_click: MagicMock,
+        browse_fill: MagicMock,
+        wait_for_code: MagicMock,
+    ) -> None:
+        requested_at = datetime.now()
+
+        downloader.submit_sms_mfa_browserbase(requested_at)
+
+        wait_for_code.assert_called_once_with(requested_at)
+        browse_fill.assert_called_once_with(
+            '//form//input[@type="text"][1]', "315238", "Amex MFA code"
+        )
+        browse_click.assert_called_once_with('//button[normalize-space(.)="Continue"]')
+
+    @patch.object(
+        downloader,
+        "browse_eval",
+        side_effect=["Transfer points. Get 30% more.", ""],
+    )
+    def test_browserbase_dismisses_post_auth_popups(
+        self, browse_eval: MagicMock
+    ) -> None:
+        downloader.dismiss_browserbase_popups()
+
+        self.assertEqual(browse_eval.call_count, 2)
+
+    @patch.object(downloader, "browse_click_xpath")
+    @patch.object(
+        downloader,
+        "browse_eval",
+        return_value="Security Verification: Trust Device",
+    )
+    @patch.object(
+        downloader,
+        "browse_url",
+        return_value="https://www.americanexpress.com/en-ca/account/two-step-verification/verify",
+    )
+    def test_browserbase_continues_trust_device_without_trusting_device(
+        self,
+        browse_url: MagicMock,
+        browse_eval: MagicMock,
+        browse_click: MagicMock,
+    ) -> None:
+        downloader.complete_trust_device_browserbase()
+
+        browse_eval.assert_called_once_with("document.body.innerText")
+        browse_click.assert_called_once_with('//button[normalize-space(.)="Continue"]')
 
     @patch.object(
         downloader, "run_osascript", return_value=downloader.AUTHENTICATED_URL
@@ -247,8 +587,10 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
     @patch.object(
         downloader, "wait_for_browserbase_authentication", return_value="session-id"
     )
+    @patch.object(downloader, "cleanup_browserbase_session")
     def test_run_orchestrates_browserbase_without_loading_database(
         self,
+        cleanup_session: MagicMock,
         wait_for_authentication: MagicMock,
         navigate_to_export: MagicMock,
         select_csv: MagicMock,
@@ -260,14 +602,50 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
             saved = root / "output" / "activity.csv"
             browserbase_download.return_value = saved
 
-            result = downloader.run(root / "output", "finance")
+            with patch.dict("os.environ", {"AMEX_BROWSER_BACKEND": "browserbase"}):
+                result = downloader.run(root / "output", "finance")
 
         self.assertEqual(result, saved)
         wait_for_authentication.assert_called_once_with()
-        navigate_to_export.assert_called_once_with()
+        navigate_to_export.assert_called_once_with(None)
         select_csv.assert_called_once_with()
         browserbase_download.assert_called_once_with("session-id", root / "output")
         validate_download.assert_called_once_with(saved)
+        cleanup_session.assert_called_once_with()
+
+    @patch.object(downloader, "cleanup_browserbase_session")
+    @patch.object(
+        downloader,
+        "wait_for_browserbase_authentication",
+        side_effect=KeyboardInterrupt,
+    )
+    def test_run_cleans_up_browserbase_session_after_interrupt(
+        self, wait_for_authentication: MagicMock, cleanup_session: MagicMock
+    ) -> None:
+        with (
+            patch.dict("os.environ", {"AMEX_BROWSER_BACKEND": "browserbase"}),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            downloader.run(Path("/tmp/amex"), "finance")
+
+        wait_for_authentication.assert_called_once_with()
+        cleanup_session.assert_called_once_with()
+
+    @patch.object(downloader, "run")
+    @patch.object(downloader.logging, "basicConfig")
+    def test_main_configures_timestamped_logger(
+        self, basic_config: MagicMock, run: MagicMock
+    ) -> None:
+        self.assertEqual(
+            downloader.main(["--output-dir", "/tmp/amex", "--database", "finance"]),
+            0,
+        )
+
+        basic_config.assert_called_once_with(
+            level=downloader.logging.INFO,
+            format="%(asctime)s-%(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
 
 
 if __name__ == "__main__":
