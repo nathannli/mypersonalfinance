@@ -28,6 +28,7 @@ LOGIN_URL = "https://www.americanexpress.com/en-ca/account/login/"
 AUTHENTICATED_URL = "https://global.americanexpress.com/dashboard"
 AMEX_HOST_SUFFIX = "americanexpress.com"
 DEFAULT_BROWSEROS_MCP_URL = "http://127.0.0.1:9010/mcp"
+DEFAULT_BROWSEROS_DOWNLOAD_DIR = Path.home() / ".browseros" / "tool-output"
 MFA_TIMEOUT_SECONDS = 2 * 60
 BROWSEROS_START_TIMEOUT_SECONDS = 30
 
@@ -67,7 +68,7 @@ class FastMCPBrowserOSSession:
         try:
             result = await self.client.call_tool(tool_name, arguments)
         except Exception as exc:
-            raise RuntimeError("BrowserOS MCP call failed") from exc
+            raise RuntimeError(f"BrowserOS MCP {tool_name} failed: {exc}") from exc
         return result.data if result.data is not None else result.content
 
 
@@ -185,7 +186,10 @@ def first_ref_for_role(snapshot: str, role: str) -> str:
 
 
 def amex_url(snapshot: str) -> str:
-    match = re.search(r"origin=(https://[^\s\]]+)", snapshot)
+    match = re.match(
+        r"^\[UNTRUSTED_PAGE_CONTENT\b[^\]]*\borigin=(https://[^\s\]]+)",
+        snapshot,
+    )
     if match is None:
         raise RuntimeError("BrowserOS did not return the active page URL")
     return match.group(1)
@@ -205,16 +209,35 @@ def is_activity_page(snapshot: str) -> bool:
     return urlparse(amex_url(snapshot)).path.rstrip("/") == "/activity"
 
 
+def browseros_download_dir() -> Path:
+    return (
+        Path(os.environ.get("BROWSEROS_DOWNLOAD_DIR", DEFAULT_BROWSEROS_DOWNLOAD_DIR))
+        .expanduser()
+        .resolve()
+    )
+
+
 def download_path(response: Any) -> Path:
+    path: Path | None = None
     if isinstance(response, dict):
         for key in ("path", "download_path"):
             value = response.get(key)
             if isinstance(value, str):
-                return Path(value)
-    match = re.search(r"(/[\w./ -]+\.(?:csv|CSV))\b", response_text(response))
-    if match is None:
-        raise RuntimeError("BrowserOS did not return a downloaded CSV path")
-    return Path(match.group(1))
+                path = Path(value)
+                break
+    if path is None:
+        match = re.search(r"(/[\w./ -]+\.(?:csv|CSV))\b", response_text(response))
+        if match is None:
+            raise RuntimeError("BrowserOS did not return a downloaded CSV path")
+        path = Path(match.group(1))
+    resolved = path.expanduser().resolve()
+    try:
+        resolved.relative_to(browseros_download_dir())
+    except ValueError as exc:
+        raise RuntimeError(
+            "BrowserOS returned a path outside its download directory"
+        ) from exc
+    return resolved
 
 
 async def snapshot(session: BrowserOSSession, page: int) -> str:
@@ -259,9 +282,21 @@ async def fill_login(
 
 
 def require_no_interactive_challenge(current: str) -> None:
+    normalized = current.lower()
+    if "security verification: trust device" in normalized:
+        return
     challenge_markers = ("captcha", "security verification", "verify your identity")
-    if any(marker in current.lower() for marker in challenge_markers):
+    if any(marker in normalized for marker in challenge_markers):
         raise RuntimeError("Amex requires an interactive security challenge")
+
+
+async def complete_trust_device(
+    session: BrowserOSSession, page: int, current: str
+) -> bool:
+    if "security verification: trust device" not in current.lower():
+        return False
+    await click(session, page, ref_for(current, "button", "Continue"))
+    return True
 
 
 async def complete_sms_mfa(session: BrowserOSSession, page: int, delivery: str) -> None:
@@ -277,8 +312,9 @@ async def complete_sms_mfa(session: BrowserOSSession, page: int, delivery: str) 
         {
             "page": page,
             "kind": "fill",
-            "ref": first_ref_for_role(code_page, "textbox"),
-            "value": code,
+            "fields": [
+                {"ref": first_ref_for_role(code_page, "textbox"), "value": code}
+            ],
         },
     )
     await click(session, page, ref_for(code_page, "button", "Continue"))
@@ -299,6 +335,8 @@ async def authenticate(
     deadline = time.monotonic() + MFA_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         current = await snapshot(session, page)
+        if await complete_trust_device(session, page, current):
+            continue
         require_no_interactive_challenge(current)
         require_amex_url(current)
         if is_authenticated_page(current):
@@ -313,6 +351,8 @@ async def authenticate(
     deadline = time.monotonic() + MFA_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         authenticated = await snapshot(session, page)
+        if await complete_trust_device(session, page, authenticated):
+            continue
         require_no_interactive_challenge(authenticated)
         require_amex_url(authenticated)
         if is_authenticated_page(authenticated):
@@ -341,7 +381,13 @@ async def authenticate_if_needed(
     deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         current = await snapshot(session, page)
-        require_amex_url(current)
+        try:
+            require_amex_url(current)
+        except RuntimeError as exc:
+            if str(exc) != "BrowserOS did not return the active page URL":
+                raise
+            await asyncio.sleep(0.5)
+            continue
         if is_dashboard_ready(current):
             return
         if 'textbox "User ID"' in current:
@@ -462,8 +508,16 @@ async def export_csv(
         page,
         ref,
     )
-    dialog = await wait_for_snapshot(session, page, "CSV", ACTION_TIMEOUT_SECONDS)
-    csv_ref = ref_for(dialog, "radio", "CSV")
+    deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        dialog = await snapshot(session, page)
+        try:
+            csv_ref = ref_for(dialog, "radio", "CSV")
+            break
+        except RuntimeError:
+            await asyncio.sleep(0.5)
+    else:
+        raise RuntimeError("Timed out waiting for Amex CSV radio control")
     await session.call("act", {"page": page, "kind": "check", "ref": csv_ref})
     dialog = await snapshot(session, page)
     return download_path(
@@ -523,11 +577,15 @@ async def run_download(
     saved: list[Path] = []
     try:
         for name, downloaded in downloads:
-            saved.append(move_download(downloaded, destination_dir, name))
+            saved.append(
+                move_download(downloaded, destination_dir, name, delete_source=False)
+            )
     except Exception:
         for path in saved:
             path.unlink(missing_ok=True)
         raise
+    for _, downloaded in downloads:
+        downloaded.unlink()
     return {"status": "downloaded", "paths": [str(path) for path in saved]}
 
 

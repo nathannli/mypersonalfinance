@@ -117,6 +117,29 @@ class TestDownloadAmexTransactions(unittest.TestCase):
             self.assertTrue(saved.exists())
         run_browse.assert_called_once()
 
+    @patch("scripts.download_amex_transactions.time.sleep")
+    @patch("scripts.download_amex_transactions.run_browse")
+    def test_browserbase_download_polls_until_csv(
+        self, run_browse: MagicMock, _sleep: MagicMock
+    ) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "activity.csv"
+
+        def write_archive(args: list[str], **_: object) -> str:
+            archive = Path(args[args.index("--output") + 1])
+            with zipfile.ZipFile(archive, "w") as output:
+                if run_browse.call_count > 1:
+                    output.writestr("activity.csv", fixture.read_bytes())
+            return ""
+
+        run_browse.side_effect = write_archive
+        with tempfile.TemporaryDirectory() as directory:
+            saved = downloader.browserbase_download(
+                "session-id", Path(directory) / "output"
+            )
+
+        self.assertEqual(saved.name, "activity.csv")
+        self.assertEqual(run_browse.call_count, 2)
+
     def test_browseros_route_returns_bridge_downloads(self) -> None:
         async def bridge_download(*_args: object) -> dict[str, object]:
             return {"status": "downloaded", "paths": ["/tmp/amex-2026-07.csv"]}

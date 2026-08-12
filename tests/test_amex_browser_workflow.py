@@ -611,7 +611,7 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         select_csv.assert_called_once_with()
         browserbase_download.assert_called_once_with("session-id", root / "output")
         validate_download.assert_called_once_with(saved)
-        cleanup_session.assert_called_once_with()
+        cleanup_session.assert_called_once_with("session-id")
 
     @patch.object(downloader, "cleanup_browserbase_session")
     @patch.object(
@@ -629,7 +629,7 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
             downloader.run(Path("/tmp/amex"), "finance")
 
         wait_for_authentication.assert_called_once_with()
-        cleanup_session.assert_called_once_with()
+        cleanup_session.assert_called_once_with(None)
 
     @patch.object(downloader, "run")
     @patch.object(downloader.logging, "basicConfig")

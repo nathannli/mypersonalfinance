@@ -59,10 +59,41 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
         run.assert_not_called()
 
     def test_rejects_non_amex_login_page(self):
-        snapshot = "[UNTRUSTED_PAGE_CONTENT origin=https://example.com/login/]"
+        for host in (
+            "example.com",
+            "evilamericanexpress.com",
+            "americanexpress.com.attacker.test",
+        ):
+            snapshot = f"[UNTRUSTED_PAGE_CONTENT origin=https://{host}/login/]"
+            with self.assertRaisesRegex(RuntimeError, "outside americanexpress.com"):
+                bridge.require_amex_url(snapshot)
 
-        with self.assertRaisesRegex(RuntimeError, "outside americanexpress.com"):
-            bridge.require_amex_url(snapshot)
+    def test_amex_origin_uses_snapshot_header_only(self):
+        snapshot = (
+            "[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/dashboard]\n"
+            "origin=https://evilamericanexpress.com/login"
+        )
+
+        self.assertEqual(
+            bridge.require_amex_url(snapshot),
+            "https://global.americanexpress.com/dashboard",
+        )
+
+    def test_download_path_requires_browseros_download_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            downloaded = root / "download-a" / "activity.csv"
+            downloaded.parent.mkdir()
+            downloaded.touch()
+            with patch.dict(os.environ, {"BROWSEROS_DOWNLOAD_DIR": str(root)}):
+                self.assertEqual(
+                    bridge.download_path({"path": str(downloaded)}),
+                    downloaded.resolve(),
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError, "outside its download directory"
+                ):
+                    bridge.download_path({"path": "/tmp/activity.csv"})
 
     def test_login_fill_uses_fresh_amex_refs(self):
         login_snapshot = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/en-ca/account/login/]
@@ -236,6 +267,31 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "interactive security challenge"):
             asyncio.run(bridge.authenticate(browser, 3, "user", "password"))
 
+    @patch.object(bridge, "wait_for_amex_sms_code", return_value="123456")
+    def test_sms_mfa_uses_fields_payload(self, _wait_for_code: MagicMock):
+        code_page = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/login]
+- generic \"Please enter the verification code\"
+- textbox \"Verification code\" [ref=e3]
+- button \"Continue\" [ref=e4]"""
+        delivery = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/login]
+- radio \"SMS\" [ref=e1]
+- button \"Continue\" [ref=e2]"""
+        browser = FakeBrowserOS([None, None, code_page, None, None])
+
+        asyncio.run(bridge.complete_sms_mfa(browser, 3, delivery))
+
+        self.assertEqual(
+            browser.calls[3],
+            (
+                "act",
+                {
+                    "page": 3,
+                    "kind": "fill",
+                    "fields": [{"ref": "e3", "value": "123456"}],
+                },
+            ),
+        )
+
     def test_run_download_validates_and_returns_only_paths(self):
         fixture = Path(__file__).parent / "fixtures" / "activity.csv"
         with tempfile.TemporaryDirectory() as directory:
@@ -283,6 +339,7 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
                     "AMEX_USER": "test-user",
                     "AMEX_PASSWORD": "test-password",
                     "BROWSEROS_MCP_URL": "http://127.0.0.1:9239/mcp",
+                    "BROWSEROS_DOWNLOAD_DIR": str(Path(directory)),
                 },
                 clear=False,
             ):

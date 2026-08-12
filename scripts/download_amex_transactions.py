@@ -12,10 +12,11 @@ import shutil
 import subprocess
 import tempfile
 import time
+from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 import messages
 from dotenv import load_dotenv
@@ -34,11 +35,16 @@ DRIVER_DAEMON_TIMEOUT = (
     f'Timed out waiting for driver daemon session "{BROWSE_SESSION}".'
 )
 NO_ACTIVE_PAGE_ERROR = f'No active page in session "{BROWSE_SESSION}".'
+ACTIVE_BROWSE_SESSION: str | None = None
 MFA_CODE_PATTERN = re.compile(r"\b(\d{6})\b")
 AMEX_SMS_MARKERS = ("american express", "amex")
 AMEX_BROWSER_BACKENDS = ("browserbase", "browseros")
 
 logger = logging.getLogger("download_amex_transactions")
+
+
+def browse_session() -> str:
+    return ACTIVE_BROWSE_SESSION or BROWSE_SESSION
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -85,10 +91,11 @@ def run_browse(
     args: list[str],
     *,
     timeout: int = ACTION_TIMEOUT_SECONDS,
-    session: str = BROWSE_SESSION,
+    session: str | None = None,
     remote: bool = True,
     retry_on_no_active_page: bool = True,
 ) -> str:
+    session = session or browse_session()
     if remote and not os.environ.get("BROWSERBASE_API_KEY"):
         raise RuntimeError(
             "BROWSERBASE_API_KEY is required; export it before starting Browserbase"
@@ -112,7 +119,7 @@ def run_browse(
             remote
             and retry_on_no_active_page
             and args[0] != "open"
-            and NO_ACTIVE_PAGE_ERROR in detail
+            and f'No active page in session "{session}".' in detail
         ):
             logger.info("Browserbase lost active page. Reopening Amex dashboard...")
             run_browse(
@@ -145,10 +152,13 @@ def browse_open() -> tuple[str, str]:
             run_browse(["open", LOGIN_URL], timeout=REMOTE_OPEN_TIMEOUT_SECONDS)
         )
     except RuntimeError as exc:
-        if DRIVER_DAEMON_TIMEOUT not in str(exc):
+        if (
+            f'Timed out waiting for driver daemon session "{browse_session()}".'
+            not in str(exc)
+        ):
             raise
         logger.info("Stale browser session found. Starting a fresh session...")
-        run_browse(["stop", "--force", "--session", BROWSE_SESSION], remote=False)
+        run_browse(["stop", "--force", "--session", browse_session()], remote=False)
         response = browse_json(
             run_browse(["open", LOGIN_URL], timeout=REMOTE_OPEN_TIMEOUT_SECONDS)
         )
@@ -159,9 +169,24 @@ def browse_open() -> tuple[str, str]:
     return session_id, session_url
 
 
-def cleanup_browserbase_session() -> None:
+def cleanup_browserbase_session(session_id: str | None = None) -> None:
+    if session_id:
+        try:
+            run_browse(
+                [
+                    "cloud",
+                    "sessions",
+                    "update",
+                    session_id,
+                    "--status",
+                    "REQUEST_RELEASE",
+                ],
+                remote=False,
+            )
+        except RuntimeError as exc:
+            logger.warning("Browserbase session release failed: %s", exc)
     try:
-        run_browse(["stop", "--force", "--session", BROWSE_SESSION], remote=False)
+        run_browse(["stop", "--force", "--session", browse_session()], remote=False)
     except RuntimeError as exc:
         logger.warning("Browserbase session cleanup failed: %s", exc)
 
@@ -363,44 +388,57 @@ def browserbase_download(
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="amex-browserbase-") as temporary:
-        archive = Path(temporary) / "downloads.zip"
-        run_browse(
-            [
-                "cloud",
-                "sessions",
-                "downloads",
-                "get",
-                session_id,
-                "--output",
-                str(archive),
-            ],
-            timeout=ACTION_TIMEOUT_SECONDS,
-            remote=False,
-        )
-        if not archive.exists():
-            raise RuntimeError("Browserbase returned no download archive")
-        with ZipFile(archive) as zip_file:
-            csv_names = [
-                name
-                for name in zip_file.namelist()
-                if name.lower().endswith(".csv") and not name.endswith("/")
-            ]
-            new_csv_names = (
-                set(csv_names)
-                if known_downloads is None
-                else set(csv_names) - known_downloads
+        deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
+        attempt = 0
+        while time.monotonic() < deadline:
+            archive = Path(temporary) / f"downloads-{attempt}.zip"
+            attempt += 1
+            run_browse(
+                [
+                    "cloud",
+                    "sessions",
+                    "downloads",
+                    "get",
+                    session_id,
+                    "--output",
+                    str(archive),
+                ],
+                timeout=ACTION_TIMEOUT_SECONDS,
+                remote=False,
             )
-            if len(new_csv_names) != 1:
-                raise RuntimeError(
-                    f"Expected exactly one new CSV in Browserbase downloads; found {len(new_csv_names)}"
-                )
-            csv_name = new_csv_names.pop()
-            downloaded = Path(temporary) / sanitize_filename(Path(csv_name).name)
-            downloaded.write_bytes(zip_file.read(csv_name))
-            saved = move_download(downloaded, output_dir, destination_name)
-            if return_download_names:
-                return saved, set(csv_names)
-            return saved
+            if archive.exists():
+                try:
+                    with ZipFile(archive) as zip_file:
+                        csv_names = [
+                            name
+                            for name in zip_file.namelist()
+                            if name.lower().endswith(".csv") and not name.endswith("/")
+                        ]
+                        new_csv_names = (
+                            set(csv_names)
+                            if known_downloads is None
+                            else set(csv_names) - known_downloads
+                        )
+                        if len(new_csv_names) > 1:
+                            raise RuntimeError(
+                                f"Expected exactly one new CSV in Browserbase downloads; found {len(new_csv_names)}"
+                            )
+                        if new_csv_names:
+                            csv_name = new_csv_names.pop()
+                            downloaded = Path(temporary) / sanitize_filename(
+                                Path(csv_name).name
+                            )
+                            downloaded.write_bytes(zip_file.read(csv_name))
+                            saved = move_download(
+                                downloaded, output_dir, destination_name
+                            )
+                            if return_download_names:
+                                return saved, set(csv_names)
+                            return saved
+                except BadZipFile:
+                    pass
+            time.sleep(0.5)
+    raise RuntimeError("Timed out waiting for a new CSV in Browserbase downloads")
 
 
 def download_browser(
@@ -625,9 +663,9 @@ def navigate_to_export() -> None:
 
 
 def navigate_to_export_browserbase(statement_months: list[str] | None = None) -> None:
-    url = browse_url()
     dismiss_browserbase_popups()
     ensure_single_card_browserbase()
+    url = browse_url()
     if urlparse(url).path == "/activity":
         logger.info("Already at statement activity page.")
         return
@@ -711,20 +749,21 @@ def select_csv_and_get_download_point() -> tuple[int, int]:
     return point["x"], point["y"]
 
 
+def csv_radio_present_browserbase() -> bool:
+    return (
+        browse_eval(
+            "String(Boolean(document.querySelector('input[type=radio][value=csv]')))"
+        )
+        .splitlines()[-1]
+        .strip()
+        == "true"
+    )
+
+
 def select_csv_browserbase() -> None:
     dismiss_browserbase_popups()
     browse_click_xpath('//*[self::a or self::button][normalize-space(.)="Download"]')
-    wait_until(
-        lambda: (
-            browse_eval(
-                "String(Boolean(document.querySelector('input[type=radio][value=csv]')))"
-            )
-            .splitlines()[-1]
-            .strip()
-            == "true"
-        ),
-        "Amex CSV export dialog in Browserbase",
-    )
+    wait_until(csv_radio_present_browserbase, "Amex CSV export dialog in Browserbase")
     browse_click_xpath('input[type="radio"][value="csv"]')
     browse_click_xpath('//a[normalize-space(.)="Download"]')
 
@@ -751,10 +790,7 @@ def select_statement_month_csv_browserbase(month: str) -> None:
         raise RuntimeError(f"Amex did not offer a statement for {label}")
     logger.info("Downloading statement with closing date %s...", selected)
     wait_until(
-        lambda: browse_eval(
-            "String(Boolean(document.querySelector('input[type=radio][value=csv]')))"
-        )
-        == "true",
+        csv_radio_present_browserbase,
         f"Amex CSV export dialog for {label} in Browserbase",
     )
     browse_click_xpath('input[type="radio"][value="csv"]')
@@ -827,7 +863,11 @@ def wait_for_download(download_dir: Path, before: set[Path]) -> Path:
 
 
 def move_download(
-    download: Path, output_dir: Path, destination_name: str | None = None
+    download: Path,
+    output_dir: Path,
+    destination_name: str | None = None,
+    *,
+    delete_source: bool = True,
 ) -> Path:
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -840,7 +880,8 @@ def move_download(
     except OSError:
         destination.unlink(missing_ok=True)
         raise
-    download.unlink()
+    if delete_source:
+        download.unlink()
     return destination
 
 
@@ -885,10 +926,14 @@ def run(
         for saved_path in saved_paths:
             logger.info("Downloaded Amex statement: %s", saved_path)
             logger.info("Load manually: %s", loader_command(saved_path, database))
-        return saved_paths if statement_months else saved_paths[0]
-    logger.info(
-        "Starting Browserbase authentication session...",
-    )
+        historic_months = [
+            month for month in (statement_months or []) if month != "latest"
+        ]
+        return saved_paths if historic_months else saved_paths[0]
+    global ACTIVE_BROWSE_SESSION
+    ACTIVE_BROWSE_SESSION = f"{BROWSE_SESSION}-{uuid4().hex}"
+    logger.info("Starting Browserbase authentication session...")
+    session_id: str | None = None
     try:
         session_id = wait_for_browserbase_authentication()
         requested = statement_months or []
@@ -930,11 +975,10 @@ def run(
             logger.info("Downloaded Amex statement: %s", saved_path)
             logger.info("Load manually: %s", loader_command(saved_path, database))
             saved_paths.append(saved_path)
-        if historic_months:
-            return saved_paths
-        return saved_paths[0]
+        return saved_paths if historic_months else saved_paths[0]
     finally:
-        cleanup_browserbase_session()
+        cleanup_browserbase_session(session_id)
+        ACTIVE_BROWSE_SESSION = None
 
 
 def main(argv: list[str] | None = None) -> int:
