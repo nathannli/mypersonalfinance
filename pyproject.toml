@@ -3,9 +3,11 @@ name = "mypersonalfinance"
 version = "0.1.0"
 description = "Personal finance transaction loaders for PostgreSQL."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "fastexcel",
+    "fastmcp>=3.2.4,<4",
+    "macos-messages",
     "numpy",
     "polars",
     "psycopg",

@@ -3,6 +3,11 @@
 classes/__pycache__
 bin/donotcommit/
 data-files/
+.amex-browser-profile/
+amex-downloads/
+playwright-report/
+test-results/
+trace.zip
 
 *.pyc
 *.pyo
@@ -14,3 +19,4 @@ data-files/
 
 .DS_Store
 .pi/
+.reposcry/
