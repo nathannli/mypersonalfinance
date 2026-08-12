@@ -31,11 +31,12 @@ uv run python load-excel-transactions.py --filepath <path_to_excel>
 
 ## download Amex Canada transactions
 
-Default route requires Browse CLI and `BROWSERBASE_API_KEY`. BrowserOS route
-requires BrowserOS neo running locally with its MCP endpoint at
-`BROWSEROS_MCP_URL` (default: `http://127.0.0.1:9010/mcp`). Both routes use
-local `.env` values for `AMEX_USER` and `AMEX_PASSWORD`; grant Full Disk Access
-to terminal app so `macos-messages` can read incoming Amex SMS code.
+The unattended Amex workflow requires macOS and Python 3.12+. Default
+Browserbase route requires Browse CLI and `BROWSERBASE_API_KEY`. BrowserOS route
+starts BrowserOS neo when needed, then connects to `BROWSEROS_MCP_URL` (default:
+`http://127.0.0.1:9010/mcp`). Both routes use local `.env` values for
+`AMEX_USER` and `AMEX_PASSWORD`; grant Full Disk Access to terminal app so
+`macos-messages` can read incoming Amex SMS code.
 
 For Fish users, load the existing secrets file before running the command:
 
@@ -101,9 +102,9 @@ Troubleshooting:
 
 - Missing `BROWSERBASE_API_KEY`: export it before running the command, for example
   by sourcing the shell secrets file that defines it.
-- BrowserOS endpoint unavailable: start BrowserOS neo and confirm
-  `BROWSEROS_MCP_URL` points to its local MCP endpoint. The BrowserOS route
-  starts `BrowserOS neo` automatically and waits up to 30 seconds for endpoint.
+- BrowserOS endpoint unavailable: confirm `BROWSEROS_MCP_URL` points to its
+  local MCP endpoint. The route starts `BrowserOS neo` automatically and waits
+  up to 30 seconds for endpoint.
 - `macos-messages` cannot read SMS: grant Full Disk Access to the terminal app in
   macOS System Settings, then rerun.
 - Missing download after CSV selection: confirm the Browserbase session download
