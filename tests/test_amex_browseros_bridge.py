@@ -203,6 +203,89 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
         self.assertEqual(ref, "e72")
         self.assertEqual([call[0] for call in browser.calls], ["snapshot", "snapshot"])
 
+    def test_statement_archive_ref_finds_collapsed_previous_statements(self):
+        self.assertEqual(
+            bridge.statement_archive_ref(
+                '- button "Previous Statements" [collapsed] [ref=e76]'
+            ),
+            "e76",
+        )
+
+    def test_statement_archive_ref_absent_when_section_missing(self):
+        self.assertIsNone(
+            bridge.statement_archive_ref(
+                '- button "Recent Statements" [expanded] [ref=e62]'
+            )
+        )
+
+    def test_statement_archive_ref_ignores_already_expanded_section(self):
+        """Clicking an expanded toggle would collapse it and hide the months."""
+        self.assertIsNone(
+            bridge.statement_archive_ref(
+                '- button "Previous Statements" [expanded] [ref=e76]'
+            )
+        )
+
+    def test_expands_previous_statements_to_reach_archived_month(self):
+        """
+        A month older than the recent window is only reachable after the
+        collapsed archive section is expanded.
+        """
+        browser = FakeBrowserOS(
+            [
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]
+- button "Download 28 March 2026 Statement" [ref=e74]""",
+                "clicked",
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [expanded] [ref=e76]
+- button "Download 28 February 2026 Statement" [ref=e99]""",
+            ]
+        )
+
+        _, ref = asyncio.run(bridge.statement_snapshot_for_month(browser, 3, "2026-02"))
+
+        self.assertEqual(ref, "e99")
+        self.assertEqual(
+            [(call[0], call[1].get("kind")) for call in browser.calls],
+            [("snapshot", None), ("act", "click"), ("snapshot", None)],
+        )
+        self.assertEqual(browser.calls[1][1]["ref"], "e76")
+
+    def test_expands_archive_only_once_across_polls(self):
+        """The toggle must not be clicked repeatedly while the month is absent."""
+        browser = FakeBrowserOS(
+            [
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]""",
+                "clicked",
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]""",
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Download 28 February 2026 Statement" [ref=e99]""",
+            ]
+        )
+
+        _, ref = asyncio.run(bridge.statement_snapshot_for_month(browser, 3, "2026-02"))
+
+        self.assertEqual(ref, "e99")
+        clicks = [c for c in browser.calls if c[0] == "act"]
+        self.assertEqual(len(clicks), 1)
+
+    def test_no_archive_click_when_month_is_already_visible(self):
+        browser = FakeBrowserOS(
+            [
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]
+- button "Download 28 February 2026 Statement" [ref=e99]""",
+            ]
+        )
+
+        _, ref = asyncio.run(bridge.statement_snapshot_for_month(browser, 3, "2026-02"))
+
+        self.assertEqual(ref, "e99")
+        self.assertEqual([call[0] for call in browser.calls], ["snapshot"])
+
     def test_v24_identifies_authenticated_dashboard(self):
         self.assertTrue(
             bridge.is_authenticated_page(

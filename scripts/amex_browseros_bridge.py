@@ -471,16 +471,39 @@ def statement_ref(snapshot: str, month: str) -> str:
     return match.group(1)
 
 
+def statement_archive_ref(snapshot: str) -> str | None:
+    """
+    Return the ref of the collapsed statement-archive toggle, if present.
+
+    Amex lists only the most recent statements under "Recent Statements";
+    anything older sits behind a collapsed "Previous Statements" section, so a
+    requested month outside that window is unreachable until it is expanded.
+    """
+    match = re.search(
+        r'- button "Previous Statements" \[collapsed\][^\n]*\[ref=(e\d+)\]',
+        snapshot,
+    )
+    return match.group(1) if match else None
+
+
 async def statement_snapshot_for_month(
     session: BrowserOSSession, page: int, month: str
 ) -> tuple[str, str]:
     deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
+    archive_clicked = False
     while time.monotonic() < deadline:
         current = await snapshot(session, page)
         try:
             return current, statement_ref(current, month)
         except RuntimeError:
-            await asyncio.sleep(0.5)
+            pass
+        # Only expand once, and only when the toggle is actually collapsed.
+        if not archive_clicked:
+            ref = statement_archive_ref(current)
+            if ref is not None:
+                await click(session, page, ref)
+                archive_clicked = True
+        await asyncio.sleep(0.5)
     label = datetime.strptime(month, "%Y-%m").strftime("%B %Y")
     raise RuntimeError(f"Timed out waiting for Amex statement for {label}")
 
