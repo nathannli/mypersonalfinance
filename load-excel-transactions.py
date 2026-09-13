@@ -113,7 +113,7 @@ def run(file_path: str, cron: bool, original_file_path: str):
             print("\n\n")
             print("New transaction found")
             return_value = parents_db.insert_expense(date, merchant, cost, cc_category)
-            if return_value == 0:
+            if return_value:
                 new_inserted_rows += 1
 
     print("\n\n")

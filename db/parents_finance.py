@@ -60,7 +60,7 @@ class ParentsFinanceDB(FinanceDB):
         cost: float,
         card_type: str = "",
         cc_category: str | None = None,
-    ) -> int:
+    ) -> bool:
         """
         Insert an expense into the database.
         Ask the user to select a category for the expense.
@@ -86,7 +86,7 @@ class ParentsFinanceDB(FinanceDB):
         if category_id is None:
             if self.cron:
                 self.manual_intervention_required_expense_count += 1
-                return 1
+                return False
             # Ask user to select category
             df = self.get_category()
             print(df)
@@ -94,7 +94,7 @@ class ParentsFinanceDB(FinanceDB):
                 category_id = input("Enter the category id: ")
                 if category_id.strip().lower() == "skip":
                     print("Skipping...")
-                    return 0
+                    return False
                 try:
                     category_id = int(category_id)
                     if category_id in df["id"].to_list():
@@ -113,9 +113,11 @@ class ParentsFinanceDB(FinanceDB):
             print(
                 f"Skipping insert for {merchant}: category '{category_name}' is configured as ignore."
             )
+            inserted = False
         else:
             query = "insert into expenses (date, merchant, cost, category_id) values (%s, %s, %s, %s)"
             self.insert(query, (date, merchant, cost, category_id))
+            inserted = True
 
         # ask the user if they want to add the merchant to the auto_match table
         if not found_match:
@@ -130,7 +132,7 @@ class ParentsFinanceDB(FinanceDB):
                     break
                 else:
                     print("Please enter a valid response (y/n).")
-        return 0
+        return inserted
 
     def get_auto_match_category(self, merchant_name: str) -> str | None:
         """
