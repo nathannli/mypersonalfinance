@@ -73,7 +73,7 @@ class MyFinanceDB(FinanceDB):
         cost: float,
         card_type: str,
         cc_category: str | None = None,
-    ) -> None:
+    ) -> bool:
         print(f"Transaction on {date} at {merchant} for {cost}")
         category = None
         subcategory = None
@@ -109,7 +109,7 @@ class MyFinanceDB(FinanceDB):
                 print(subcategory_id)
                 if lower(subcategory_id) == "skip":
                     print("Skipping...")
-                    return
+                    return False
                 try:
                     subcategory_id = int(subcategory_id)
                     if subcategory_id not in valid_ids:
@@ -131,7 +131,7 @@ class MyFinanceDB(FinanceDB):
         ):
             if self.check_if_reimbursement_expense_exists(date, merchant):
                 print(f"Record already exists for {date} at {merchant}. Skipping...")
-                return
+                return False
         # insert the expense
         query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
         self.insert(query, (date, merchant, cost, category_id, subcategory_id))
@@ -139,7 +139,7 @@ class MyFinanceDB(FinanceDB):
         if not found_match:
             # if merchant is "Interac e-Transfer® Out", skip
             if merchant == "Interac e-Transfer® Out":
-                return
+                return True
             while True:
                 add_to_auto_match = input("Add to auto_match table? (y/n): ")
                 if add_to_auto_match == "y":
@@ -156,6 +156,7 @@ class MyFinanceDB(FinanceDB):
                     break
                 else:
                     print("Please enter a valid response (y/n).")
+        return True
 
     def get_auto_match_category(self, merchant: str) -> tuple[str, str] | None:
         """

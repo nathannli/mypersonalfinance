@@ -19,6 +19,6 @@ class Config:
         self.ws_credit_link = os.getenv("WS_CREDIT_LINK")
         self.debug = debug
         if self.debug:
-            print(f"{self.postgres_connection_string=}")
+            print("postgres_connection_string=<redacted>")
             print(f"{self.ws_debt_link=}")
             print(f"{self.ws_credit_link=}")
