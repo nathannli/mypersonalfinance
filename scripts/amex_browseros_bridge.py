@@ -149,7 +149,11 @@ def page_from_response(response: Any) -> int:
     match = re.search(r"\bpage\s+(\d+)\b", response_text(response), re.IGNORECASE)
     if match is None:
         raise RuntimeError("BrowserOS did not return a task-owned page")
-    return int(match.group(1))
+    try:
+        return int(match.group(1))
+    except ValueError as exc:
+        # Python caps int() at 4300 digits, and this text is untrusted page content.
+        raise RuntimeError("BrowserOS returned an implausible page id") from exc
 
 
 def ref_for(snapshot: str, role: str, name: str) -> str:
@@ -508,6 +512,34 @@ async def statement_snapshot_for_month(
     raise RuntimeError(f"Timed out waiting for Amex statement for {label}")
 
 
+def csv_radio_ref(snapshot: str) -> str | None:
+    """Return the ref of the export dialog's CSV control, if that dialog is open."""
+    match = re.search(r'- radio "CSV"[^\n]*\[ref=(e\d+)\]', snapshot)
+    return match.group(1) if match else None
+
+
+async def wait_for_export_dialog_to_close(session: BrowserOSSession, page: int) -> None:
+    """
+    Wait for the export dialog to finish closing.
+
+    BrowserOS's `download` clicks the dialog's Download link and returns as soon
+    as the file is saved, but the dialog can still be on screen for a moment
+    afterwards. It is a full-viewport overlay, so the next statement's download
+    button is unclickable while it is up:
+
+        act failed: Element e70 (button "Download 28 May 2026 Statement") is
+        covered by <div.pad-1-tb-md-up> at its click point
+
+    Poll fresh snapshots until the dialog's CSV control is gone.
+    """
+    deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if csv_radio_ref(await snapshot(session, page)) is None:
+            return
+        await asyncio.sleep(0.5)
+    raise RuntimeError("Timed out waiting for Amex export dialog to close")
+
+
 async def export_csv(
     session: BrowserOSSession,
     page: int,
@@ -534,20 +566,54 @@ async def export_csv(
     deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         dialog = await snapshot(session, page)
-        try:
-            csv_ref = ref_for(dialog, "radio", "CSV")
+        csv_ref = csv_radio_ref(dialog)
+        if csv_ref is not None:
             break
-        except RuntimeError:
-            await asyncio.sleep(0.5)
+        await asyncio.sleep(0.5)
     else:
         raise RuntimeError("Timed out waiting for Amex CSV radio control")
     await session.call("act", {"page": page, "kind": "check", "ref": csv_ref})
     dialog = await snapshot(session, page)
-    return download_path(
+    downloaded = download_path(
         await session.call(
             "download", {"page": page, "ref": ref_for(dialog, "link", "Download")}
         )
     )
+    await wait_for_export_dialog_to_close(session, page)
+    return downloaded
+
+
+async def export_statement_csv(
+    session: BrowserOSSession, page: int, month: str
+) -> Path:
+    """
+    Export one historic statement month.
+
+    The export dialog is a full-viewport overlay and can outlive the download
+    that closes it, so the click on the next month's button is occasionally
+    rejected while the overlay is still fading out:
+
+        act failed: Element e64 (button "Download 28 August 2026 Statement") is
+        covered by <button.flex> at its click point
+
+    Re-derive the button from a fresh snapshot and retry while that happens.
+    """
+    deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
+    while True:
+        statements, download_ref = await statement_snapshot_for_month(
+            session, page, month
+        )
+        try:
+            return await export_csv(session, page, statements, ref=download_ref)
+        except RuntimeError as exc:
+            if time.monotonic() >= deadline:
+                raise
+            # Only the statement button is worth retrying. If the dialog's own
+            # Download link reports `covered by`, the export already started and
+            # re-clicking the button could open a second dialog.
+            if f"Element {download_ref} " not in str(exc):
+                raise
+            await asyncio.sleep(0.5)
 
 
 async def run_download(
@@ -581,14 +647,8 @@ async def run_download(
             if not statements_ready:
                 await navigate_to_statements(session, page)
                 statements_ready = True
-            statements, download_ref = await statement_snapshot_for_month(
-                session, page, item
-            )
             downloads.append(
-                (
-                    f"amex-{item}.csv",
-                    await export_csv(session, page, statements, ref=download_ref),
-                )
+                (f"amex-{item}.csv", await export_statement_csv(session, page, item))
             )
     destination_dir = Path(output_dir).expanduser().resolve()
     destinations = [destination_dir / name for name, _ in downloads]
