@@ -1,4 +1,3 @@
-from numpy._core.defchararray import lower
 from datetime import date
 
 import polars as pl
@@ -7,6 +6,15 @@ from sources.ref_data import reimbursement_merchant_ref
 from sources.csv.rogers import RogersStatement
 from sources.csv.simplii_visa import SimpliiVisaStatement
 from db.finance_base import FinanceDB
+from services.llm_categorizer import OpenCodexCategorizer
+from services.transaction_categorization import (
+    ProviderAction,
+    Resolution,
+    TransactionOutcome,
+    TransactionStatus,
+    UnresolvedReason,
+    build_canonical_context,
+)
 
 
 class MyFinanceDB(FinanceDB):
@@ -45,6 +53,7 @@ class MyFinanceDB(FinanceDB):
         query = """
         select 
             subcategories.id as subcategory_id, 
+            categories.id as category_id,
             subcategories.name as subcategory, 
             categories.name as category 
         from subcategories 
@@ -53,6 +62,7 @@ class MyFinanceDB(FinanceDB):
         """
         schema = {
             "subcategory_id": pl.Int64,
+            "category_id": pl.Int64,
             "subcategory": pl.Utf8,
             "category": pl.Utf8,
         }
@@ -66,6 +76,79 @@ class MyFinanceDB(FinanceDB):
         """
         return self._check_exists("expenses", {"date": date, "merchant": merchant})
 
+    def get_categorization_choices(self) -> list[dict[str, object]]:
+        return [
+            {
+                "subcategory_id": row["subcategory_id"],
+                "category_id": row["category_id"],
+                "subcategory_name": row["subcategory"],
+                "category_name": row["category"],
+            }
+            for row in self.get_subcategory_and_category().iter_rows(named=True)
+        ]
+
+    @staticmethod
+    def _is_reimbursement_merchant(merchant: str) -> bool:
+        return any(
+            merchant.lower() in reimbursement_merchant.lower()
+            for reimbursement_merchant in reimbursement_merchant_ref
+        )
+
+    def _get_reference_category(
+        self, merchant: str, card_type: str, cc_category: str | None
+    ) -> tuple[str, str] | None:
+        if card_type == "rogers" and cc_category is not None:
+            reference = RogersStatement.auto_match_category(cc_category)
+            return reference or self.get_auto_match_category(merchant)
+        if card_type == "simplii_visa":
+            return SimpliiVisaStatement.auto_match_category()
+        return self.get_auto_match_category(merchant)
+
+    @staticmethod
+    def _find_reference_choice(
+        choices: list[dict[str, object]], reference: tuple[str, str]
+    ) -> dict[str, object] | None:
+        category, subcategory = reference
+        matches = [
+            choice
+            for choice in choices
+            if choice["category_name"] == category
+            and choice["subcategory_name"] == subcategory
+        ]
+        if len(matches) != 1:
+            return None
+        return matches[0]
+
+    def _insert_choice(
+        self,
+        date: date,
+        merchant: str,
+        cost: float,
+        choice: dict[str, object],
+        resolution: Resolution,
+    ) -> TransactionOutcome:
+        category_id = choice["category_id"]
+        subcategory_id = choice["subcategory_id"]
+        if (
+            isinstance(category_id, bool)
+            or not isinstance(category_id, int)
+            or isinstance(subcategory_id, bool)
+            or not isinstance(subcategory_id, int)
+        ):
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                resolution,
+                UnresolvedReason.INVALID_CHOICE,
+            )
+        if (
+            self._is_reimbursement_merchant(merchant)
+            or subcategory_id == self.reimbursement_subcategory_id
+        ) and self.check_if_reimbursement_expense_exists(date, merchant):
+            return TransactionOutcome(TransactionStatus.DUPLICATE, resolution)
+        query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
+        self.insert(query, (date, merchant, cost, category_id, subcategory_id))
+        return TransactionOutcome(TransactionStatus.INSERTED, resolution)
+
     def insert_expense(
         self,
         date: date,
@@ -73,90 +156,83 @@ class MyFinanceDB(FinanceDB):
         cost: float,
         card_type: str,
         cc_category: str | None = None,
-    ) -> bool:
+        categorizer: OpenCodexCategorizer | None = None,
+    ) -> TransactionOutcome:
         print(f"Transaction on {date} at {merchant} for {cost}")
-        category = None
-        subcategory = None
-        # try auto match
-        found_match = False
-        if card_type == "rogers" and cc_category is not None:
-            # only rogers cc uses cc_category, so try ref rogers automatch first
-            ref_category_tuple = RogersStatement.auto_match_category(cc_category)
-            # then try get_auto_match_category
-            if ref_category_tuple is None:
-                ref_category_tuple = self.get_auto_match_category(merchant)
-        elif card_type == "simplii_visa":
-            ref_category_tuple = SimpliiVisaStatement.auto_match_category()
-        else:
-            # use merchant name to auto match
-            ref_category_tuple = self.get_auto_match_category(merchant)
-        # if auto match found get category id and subcategory id
-        if ref_category_tuple is not None:
-            found_match = True
-            category, subcategory = ref_category_tuple
-            print(f"Ref Category: {category}, Ref Subcategory: {subcategory}")
-            subcategory_id = self.get_subcategory_id_from_name(subcategory)
-            category_id = self.get_category_id_from_subcategory_id(subcategory_id)
-        # else user input
-        else:
-            df = self.get_subcategory_and_category()
-            print("\n\n")
-            print(df)
-            print("\n\n")
-            valid_ids = df.get_column("subcategory_id").to_list()
-            while True:
-                subcategory_id = input("Enter the subcategory id: ")
-                print(subcategory_id)
-                if lower(subcategory_id) == "skip":
-                    print("Skipping...")
-                    return False
-                try:
-                    subcategory_id = int(subcategory_id)
-                    if subcategory_id not in valid_ids:
-                        print(
-                            "Invalid subcategory id. Please enter a valid id from the list above."
-                        )
-                        continue
-                    break
-                except ValueError:
-                    print("Invalid input. Please enter a valid integer.")
-            category_id = self.get_category_id_from_subcategory_id(subcategory_id)
-        # if subcategory is reimbursement or if in reimbursement_merchant_ref, need to double check if record already exists (date, merchant only)
-        if (
-            any(
-                merchant.lower() in reimbursement_merchant.lower()
-                for reimbursement_merchant in reimbursement_merchant_ref
+        if self.check_if_expense_exists(date, merchant, cost):
+            return TransactionOutcome(TransactionStatus.DUPLICATE)
+        if self._is_reimbursement_merchant(
+            merchant
+        ) and self.check_if_reimbursement_expense_exists(date, merchant):
+            return TransactionOutcome(
+                TransactionStatus.DUPLICATE, Resolution.DETERMINISTIC
             )
-            or subcategory_id == self.reimbursement_subcategory_id
-        ):
-            if self.check_if_reimbursement_expense_exists(date, merchant):
-                print(f"Record already exists for {date} at {merchant}. Skipping...")
-                return False
-        # insert the expense
-        query = "insert into expenses (date, merchant, cost, category_id, subcategory_id) values (%s, %s, %s, %s, %s)"
-        self.insert(query, (date, merchant, cost, category_id, subcategory_id))
-        # ask the user if they want to add the merchant to the auto_match table
-        if not found_match:
-            # if merchant is "Interac e-Transfer® Out", skip
-            if merchant == "Interac e-Transfer® Out":
-                return True
-            while True:
-                add_to_auto_match = input("Add to auto_match table? (y/n): ")
-                if add_to_auto_match == "y":
-                    # check if category and subcategory are not None, if they are None, get the names from the database
-                    if category is None or subcategory is None:
-                        category, subcategory = (
-                            self.get_category_and_subcategory_name_from_subcategory_id(
-                                subcategory_id
-                            )
-                        )
-                    self.insert_into_auto_match(merchant, category, subcategory)
-                    break
-                elif add_to_auto_match == "n":
-                    break
-                else:
-                    print("Please enter a valid response (y/n).")
-        return True
+
+        choices = self.get_categorization_choices()
+        try:
+            reference = self._get_reference_category(merchant, card_type, cc_category)
+        except ValueError:
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                Resolution.DETERMINISTIC,
+                UnresolvedReason.INVALID_CHOICE,
+            )
+
+        if reference is not None:
+            choice = self._find_reference_choice(choices, reference)
+            if choice is None:
+                return TransactionOutcome(
+                    TransactionStatus.UNRESOLVED,
+                    Resolution.DETERMINISTIC,
+                    UnresolvedReason.INVALID_CHOICE,
+                )
+            return self._insert_choice(
+                date, merchant, cost, choice, Resolution.DETERMINISTIC
+            )
+
+        if categorizer is None:
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                reason=UnresolvedReason.PROVIDER_ERROR,
+            )
+
+        try:
+            context = build_canonical_context(
+                database="finance",
+                merchant=merchant,
+                amount=cost,
+                statement_category=cc_category,
+                allowed_choices=choices,
+            )
+        except ValueError:
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                reason=UnresolvedReason.INVALID_CHOICE,
+            )
+
+        result = categorizer.categorize(context)
+        if result.action != ProviderAction.SELECT or result.choice_id is None:
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                reason=result.reason or UnresolvedReason.MALFORMED,
+            )
+
+        choice = next(
+            (item for item in choices if item["subcategory_id"] == result.choice_id),
+            None,
+        )
+        if choice is None:
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                reason=UnresolvedReason.INVALID_CHOICE,
+            )
+        if not categorizer.can_write(context, result.choice_id):
+            return TransactionOutcome(
+                TransactionStatus.SHADOW,
+                Resolution.LLM,
+                suggested_choice_id=result.choice_id,
+            )
+        return self._insert_choice(date, merchant, cost, choice, Resolution.LLM)
 
     def get_auto_match_category(self, merchant: str) -> tuple[str, str] | None:
         """

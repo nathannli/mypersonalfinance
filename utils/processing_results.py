@@ -3,7 +3,18 @@ Processing Results Tracker - Track and report transaction processing results.
 
 This module provides a class to encapsulate result tracking logic for
 processing credit card transaction files.
+
+Every processed input row contributes exactly one typed outcome, so the
+printed totals reconcile against the number of rows the loader produced.
 """
+
+from collections.abc import Mapping, Sequence
+
+from services.transaction_categorization import TransactionStatus
+
+RUN_COMPLETE = "complete"
+RUN_PARTIAL = "partial"
+RUN_FAILED = "failed"
 
 
 class ProcessingResults:
@@ -18,22 +29,44 @@ class ProcessingResults:
         """Initialize empty results tracker."""
         self.results = []
         self.failed_files = []
+        self.totals = {status: 0 for status in TransactionStatus}
+        self.unresolved_rows = []
 
-    def add_success(self, file_name: str, inserted: int, total: int) -> None:
+    def add_success(
+        self,
+        file_name: str,
+        totals: Mapping[TransactionStatus, int],
+        total: int,
+        unresolved_rows: Sequence[dict] = (),
+    ) -> None:
         """
         Record a successful file processing.
 
         Args:
             file_name: Name of the processed file
-            inserted: Number of transactions inserted
+            totals: Count of each typed outcome produced by the file
             total: Total number of transactions in the file
+            unresolved_rows: Reason/merchant/date for each unresolved row
+
+        Raises:
+            ValueError: If the typed outcomes do not reconcile to `total`
         """
+        counted = sum(totals.values())
+        if counted != total:
+            raise ValueError(
+                f"Outcome totals for {file_name} do not reconcile: "
+                f"{counted} outcomes for {total} processed rows"
+            )
+        for status, count in totals.items():
+            self.totals[status] += count
+        self.unresolved_rows.extend(unresolved_rows)
         self.results.append(
             {
                 "file": file_name,
                 "status": "success",
-                "inserted": inserted,
+                "inserted": totals.get(TransactionStatus.INSERTED, 0),
                 "total": total,
+                "totals": dict(totals),
             }
         )
 
@@ -47,7 +80,13 @@ class ProcessingResults:
         """
         self.failed_files.append({"file": file_name, "error": error})
         self.results.append(
-            {"file": file_name, "status": "failed", "inserted": 0, "total": 0}
+            {
+                "file": file_name,
+                "status": "failed",
+                "inserted": 0,
+                "total": 0,
+                "totals": {},
+            }
         )
 
     def get_total_inserted(self) -> int:
@@ -69,6 +108,30 @@ class ProcessingResults:
     def has_failures(self) -> bool:
         """Check if any files failed to process."""
         return len(self.failed_files) > 0
+
+    def get_status_total(self, status: TransactionStatus) -> int:
+        """Get the number of rows that produced the given typed outcome."""
+        return self.totals[status]
+
+    def get_run_status(self) -> str:
+        """Return `complete`, `partial`, or `failed` for the whole run."""
+        if self.has_failures():
+            return RUN_FAILED
+        unfinished = (
+            self.totals[TransactionStatus.SHADOW]
+            + self.totals[TransactionStatus.UNRESOLVED]
+        )
+        return RUN_PARTIAL if unfinished > 0 else RUN_COMPLETE
+
+    def get_exit_code(self) -> int:
+        """Exit 1 only for a failed run; complete and partial both exit 0."""
+        return 1 if self.get_run_status() == RUN_FAILED else 0
+
+    def format_totals(self) -> str:
+        """Render every typed outcome count in a stable order."""
+        return ", ".join(
+            f"{status.value}={self.totals[status]}" for status in TransactionStatus
+        )
 
     def print_summary(self, total_files: int) -> None:
         """
@@ -96,8 +159,18 @@ class ProcessingResults:
             for failed in self.failed_files:
                 print(f"  - {failed['file']}: {failed['error']}")
 
+        if self.unresolved_rows:
+            print(f"\n{len(self.unresolved_rows)} unresolved transaction(s):")
+            for unresolved in self.unresolved_rows:
+                print(
+                    f"  - {unresolved['date']} {unresolved['merchant']}: "
+                    f"{unresolved['reason']}"
+                )
+
         print(
             f"\nTotal: {self.get_total_inserted()}/{self.get_total_transactions()} "
             f"transactions inserted from {self.get_successful_count()}/{total_files} file(s)"
         )
+        print(f"Outcomes: {self.format_totals()}")
+        print(f"Run status: {self.get_run_status()}")
         print("=" * 80)

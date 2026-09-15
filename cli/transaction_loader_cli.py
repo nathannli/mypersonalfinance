@@ -7,8 +7,10 @@ validation, and orchestration of the transaction loading process.
 
 import argparse
 import os
+from collections.abc import Sequence
 from sys import exit
 
+from config import Config
 from sources.registry import (
     get_card_type_names,
     get_file_based_card_types,
@@ -16,6 +18,8 @@ from sources.registry import (
 )
 from db.my_finance import MyFinanceDB
 from db.parents_finance import ParentsFinanceDB
+from services.categorizer_factory import build_categorizer, write_authorizer_for
+from services.llm_categorizer import OpenCodexCategorizer
 from services.transaction_loader import TransactionLoader
 from services.transaction_processor import TransactionProcessor
 
@@ -87,7 +91,7 @@ Supported card types:
         return parser
 
     def _validate_arguments(
-        self, card_type: str, file_path: str, folder_path: str
+        self, card_type: str, file_path: str | None, folder_path: str | None
     ) -> None:
         """
         Validate argument combinations for card type and file inputs.
@@ -121,8 +125,8 @@ Supported card types:
                 )
 
     def _build_file_list(
-        self, card_type: str, file_path: str, folder_path: str
-    ) -> list[str]:
+        self, card_type: str, file_path: str | None, folder_path: str | None
+    ) -> Sequence[str | None]:
         """
         Build list of files to process based on arguments.
 
@@ -163,6 +167,12 @@ Supported card types:
             return [file_path]
         else:
             return []
+
+    @staticmethod
+    def _build_categorizer(
+        config: Config, write_authorizer=None
+    ) -> OpenCodexCategorizer:
+        return build_categorizer(config, write_authorizer)
 
     def _get_database_instance(self, database_name: str):
         """
@@ -210,20 +220,31 @@ Supported card types:
             # Build list of files to process
             files_to_process = self._build_file_list(card_type, file_path, folder_path)
 
-            # Load database
+            config = Config()
+
+            # Load database (read-only until an outcome insert happens)
             print("Loading database...")
             database = self._get_database_instance(database_name)
             print("Database loaded\n")
 
+            # Fail closed before any mutation when write mode is unapproved
+            write_authorizer = write_authorizer_for(
+                config, database_name, database.get_categorization_choices
+            )
+            categorizer = self._build_categorizer(config, write_authorizer)
+
             # Initialize services
             loader = TransactionLoader()
-            processor = TransactionProcessor(database, loader)
+            processor = TransactionProcessor(database, loader, categorizer)
 
             # Process files
             results = processor.process_files(card_type, files_to_process)
 
-            # Print summary
+            # Print summary; complete/partial exit 0, failed exits 1
             results.print_summary(len(files_to_process))
+            exit_code = results.get_exit_code()
+            if exit_code != 0:
+                exit(exit_code)
 
         except Exception as e:
             print(f"ERROR: {e}")
