@@ -16,7 +16,10 @@ from services.transaction_categorization import (
 
 class ParentsFinanceDB(FinanceDB):
     cron: bool
-    manual_intervention_required_expense_count: int = 0
+
+    # Taxonomy snapshot: read once per run (V43). Class-level None default
+    # so subclasses that skip __init__ still observe the lazy cache.
+    _categorization_choices: list[dict[str, object]] | None = None
 
     def __init__(self, debug: bool = False, cron: bool = False):
         super().__init__(database_name="parents_finance", debug=debug)
@@ -63,13 +66,15 @@ class ParentsFinanceDB(FinanceDB):
             return None
 
     def get_categorization_choices(self) -> list[dict[str, object]]:
-        return [
-            {
-                "category_id": row["id"],
-                "category_name": row["category"],
-            }
-            for row in self.get_category().iter_rows(named=True)
-        ]
+        if self._categorization_choices is None:
+            self._categorization_choices = [
+                {
+                    "category_id": row["id"],
+                    "category_name": row["category"],
+                }
+                for row in self.get_category().iter_rows(named=True)
+            ]
+        return self._categorization_choices
 
     @staticmethod
     def _find_choice(
@@ -124,7 +129,16 @@ class ParentsFinanceDB(FinanceDB):
             category_id = self.get_category_id_from_name(cc_category)
             if category_id is None:
                 category = self.get_auto_match_category(merchant)
-                category_id = self.get_category_id_from_name(category)
+                if category is not None:
+                    category_id = self.get_category_id_from_name(category)
+                    if category_id is None:
+                        # V44: a stale mapping is surfaced deterministically,
+                        # never silently rerouted to the LLM path.
+                        return TransactionOutcome(
+                            TransactionStatus.UNRESOLVED,
+                            Resolution.DETERMINISTIC,
+                            UnresolvedReason.INVALID_CHOICE,
+                        )
         except ValueError:
             return TransactionOutcome(
                 TransactionStatus.UNRESOLVED,
@@ -161,7 +175,7 @@ class ParentsFinanceDB(FinanceDB):
         except ValueError:
             return TransactionOutcome(
                 TransactionStatus.UNRESOLVED,
-                reason=UnresolvedReason.INVALID_CHOICE,
+                reason=UnresolvedReason.INVALID_CONTEXT,
             )
 
         result = categorizer.categorize(context)

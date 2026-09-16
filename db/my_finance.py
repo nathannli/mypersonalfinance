@@ -20,31 +20,12 @@ from services.transaction_categorization import (
 class MyFinanceDB(FinanceDB):
     reimbursement_subcategory_id = 14
 
+    # Taxonomy snapshot: read once per run (V43). Class-level None default
+    # so subclasses that skip __init__ still observe the lazy cache.
+    _categorization_choices: list[dict[str, object]] | None = None
+
     def __init__(self, debug: bool = False):
         super().__init__(database_name="finance", debug=debug)
-
-    def get_subcategory_id_from_name(self, subcategory_name: str) -> int:
-        """
-        Get the subcategory id from the subcategory name.
-        """
-        query = "select id from subcategories where name = %s"
-        return self.select(query, (subcategory_name,))[0][0]
-
-    def get_category_id_from_subcategory_id(self, subcategory_id: int) -> int:
-        """
-        Get the category id from the subcategory id.
-        """
-        query = "select category_id from subcategories where id = %s"
-        return self.select(query, (subcategory_id,))[0][0]
-
-    def get_category_and_subcategory_name_from_subcategory_id(
-        self, subcategory_id: int
-    ) -> tuple[str, str]:
-        """
-        Get the category and subcategory name from the subcategory id.
-        """
-        query = "select c.name as category, s.name as subcategory from categories c join subcategories s on c.id = s.category_id where s.id = %s"
-        return self.select(query, (subcategory_id,))[0]
 
     def get_subcategory_and_category(self) -> pl.DataFrame:
         """
@@ -77,15 +58,17 @@ class MyFinanceDB(FinanceDB):
         return self._check_exists("expenses", {"date": date, "merchant": merchant})
 
     def get_categorization_choices(self) -> list[dict[str, object]]:
-        return [
-            {
-                "subcategory_id": row["subcategory_id"],
-                "category_id": row["category_id"],
-                "subcategory_name": row["subcategory"],
-                "category_name": row["category"],
-            }
-            for row in self.get_subcategory_and_category().iter_rows(named=True)
-        ]
+        if self._categorization_choices is None:
+            self._categorization_choices = [
+                {
+                    "subcategory_id": row["subcategory_id"],
+                    "category_id": row["category_id"],
+                    "subcategory_name": row["subcategory"],
+                    "category_name": row["category"],
+                }
+                for row in self.get_subcategory_and_category().iter_rows(named=True)
+            ]
+        return self._categorization_choices
 
     @staticmethod
     def _is_reimbursement_merchant(merchant: str) -> bool:
@@ -207,7 +190,7 @@ class MyFinanceDB(FinanceDB):
         except ValueError:
             return TransactionOutcome(
                 TransactionStatus.UNRESOLVED,
-                reason=UnresolvedReason.INVALID_CHOICE,
+                reason=UnresolvedReason.INVALID_CONTEXT,
             )
 
         result = categorizer.categorize(context)

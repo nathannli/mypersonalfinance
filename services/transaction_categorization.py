@@ -30,6 +30,7 @@ class UnresolvedReason(StrEnum):
     PROVIDER_ERROR = "provider_error"
     MALFORMED = "malformed"
     INVALID_CHOICE = "invalid_choice"
+    INVALID_CONTEXT = "invalid_context"
     CIRCUIT_OPEN = "circuit_open"
 
 

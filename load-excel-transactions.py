@@ -1,4 +1,4 @@
-import urllib
+import urllib.request
 import argparse
 import os
 import re
@@ -188,7 +188,13 @@ def fetch_ftp_file(ftp_url: str) -> str:
     return tmp_file.name
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> int:
+    """Run the Excel load and return the process exit code.
+
+    Exit contract (V37/V39): 0 for complete/partial runs, 1 for any
+    file error, approval abort, or interrupt. Never a bare success exit
+    on the failure path.
+    """
     # Set up argument parser
     parser = argparse.ArgumentParser(
         description="Load credit card data into PostgreSQL database from pre-existing excel file"
@@ -199,7 +205,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cron", required=False, help="boolean, any input will trigger true"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     file_path = args.filepath
     cron = True if args.cron else False
 
@@ -210,15 +216,20 @@ if __name__ == "__main__":
 
     try:
         run(local_file_path, cron, file_path)
+        return 0
     except KeyboardInterrupt:
         print("Keyboard interrupt")
-        exit()
+        return 1
     except Exception as e:
         if cron:
             send_discord_message(f"Error for {file_path}: {e}")
         else:
             print(f"Error for {file_path}: {e}")
-        exit()
+        return 1
     finally:
         if local_file_path != file_path:
             os.remove(local_file_path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
