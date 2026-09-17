@@ -3,6 +3,7 @@ from datetime import date
 from typing import Any
 
 from db.base import PostgresDB
+from services.transaction_categorization import TransactionOutcome, TransactionStatus
 
 
 class FinanceDB(PostgresDB):
@@ -10,13 +11,9 @@ class FinanceDB(PostgresDB):
         super().__init__(database_name=database_name, debug=debug)
 
     @abstractmethod
-    def insert_expense(self, *_: Any, **__: Any) -> bool:
-        """
-        Insert an expense into the database.
-        Ask the user to select a category and subcategory for the expense.
-        Returns True if a row was persisted, False if skipped/duplicate/ignored.
-        """
-        return False
+    def insert_expense(self, *_: Any, **__: Any) -> TransactionOutcome:
+        """Insert one expense or return its non-insert outcome."""
+        return TransactionOutcome(TransactionStatus.IGNORED)
 
     @abstractmethod
     def get_auto_match_category(self, merchant: str) -> Any:

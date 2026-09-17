@@ -133,6 +133,106 @@ Manual authenticated acceptance test:
 6. Run the downloader again with the same statement filename and confirm it
    refuses to overwrite the first file.
 
+## LLM transaction categorization
+
+Unknown transactions are categorized by an LLM instead of an interactive
+prompt, so `load-transactions.py` and `load-excel-transactions.py` both finish
+without user input. Existing deterministic matching (card category rules,
+exact merchant auto-match, substring auto-match) always runs first and always
+wins; a matched transaction makes no provider request.
+
+### Environment
+
+```sh
+OPENCODEX_BASE_URL=http://localhost:10100
+OPENCODEX_API_KEY=<key>
+TRANSACTION_LLM_MODEL=anthropic/claude-haiku-4-5
+TRANSACTION_LLM_TIMEOUT_SECONDS=120
+TRANSACTION_LLM_MODE=shadow
+```
+
+Only the configured base URL and the exact configured model are ever called;
+there is no provider or model fallback. A missing or empty `OPENCODEX_API_KEY`
+becomes a `provider_error` on the first LLM call, so deterministic-only runs do
+not need a key.
+
+### Cloud and proxy trust
+
+`anthropic/claude-haiku-4-5` is a cloud model. Merchant names,
+amounts, and the live category list for the selected database leave the local
+network when an unknown transaction is categorized. The configured OpenCodex
+proxy is the trusted routing boundary: approval binds the normalized proxy URL
+and the exact requested model ID, but it cannot attest which upstream route the
+proxy chooses. Point `OPENCODEX_BASE_URL` at a proxy you control.
+
+### Shadow mode and write mode
+
+`TRANSACTION_LLM_MODE=shadow` is the default and performs zero LLM-driven
+database writes. A validated LLM choice is reported as a `shadow` outcome with
+its suggested choice ID; deterministic inserts and deletes behave exactly as
+before.
+
+`TRANSACTION_LLM_MODE=write` applies LLM-selected categories, but only after a
+per-database approval record exists. An unapproved or stale approval aborts the
+run before any database mutation; it is never silently downgraded to shadow.
+Even when approved, a write happens only for a context that appears in that
+database's approved gold subset **and** whose runtime choice equals the approved
+choice. Unseen or mismatched contexts stay `shadow`.
+
+Approval is per database. A `finance` approval never authorizes
+`parents_finance` writes, or the reverse.
+
+### Run status and exit codes
+
+Every processed row produces exactly one outcome: `inserted`, `duplicate`,
+`ignored`, `deleted`, `shadow`, or `unresolved`. Totals reconcile against the
+number of processed rows, and the summary prints each unresolved merchant, date,
+and reason.
+
+- `complete`: no `shadow` and no `unresolved` rows; exit code 0.
+- `partial`: at least one `shadow` or `unresolved` row; exit code 0.
+- `failed`: a file failed or write approval aborted; exit code 1.
+
+The Excel cron run reports the same status and every outcome count through its
+Discord notification.
+
+### Circuit breaker
+
+A provider connection error, authentication failure, unavailable model, or any
+non-2xx response opens the run-level circuit immediately. Two consecutive
+timeouts or protocol/schema validation failures also open it. Once open, no
+further provider calls are made for that run, and remaining unknown rows become
+`unresolved` instead of stalling the load. Only a fully validated `select` or
+`abstain` resets the failure streak.
+
+Within a run, a validated `select` is cached by full canonical context
+(database, normalized merchant, signed amount in minor units, normalized
+statement category, live choice list) plus model, prompt version, schema
+version, and mode. Abstentions and failures are never cached.
+
+### Gold validation before write mode
+
+Write mode requires a user-approved gold set and three consecutive fully
+passing validation runs:
+
+- `.transaction-llm-gold.json` — private, git-ignored, real transaction
+  contexts with user-approved expected results.
+- `.transaction-llm-approval.json` — private, git-ignored, per-database
+  approval record holding only identity hashes, pass count, and timestamp.
+- `tests/fixtures/transaction_llm_gold_synthetic.json` — tracked, synthetic
+  data only, used by the automated tests.
+
+Both private files resolve from the repository root, never the process working
+directory, so cron and direct runs agree. Each validation pass builds a fresh
+categorizer with an empty cache and reset circuit, and each gold case must cost
+exactly one real provider request; a cache replay, an opened circuit, or any
+mismatch fails the pass. Approval is invalidated whenever the database, base
+URL, model, prompt bytes, response-schema bytes, live taxonomy, or gold subset
+changes.
+
+The automated test suite makes no network requests; it drives fake
+categorizers only.
+
 # custom packages:
 - custom version of https://github.com/ImranR98/Wealthsimpleton that has been modified to be a pip-installable package
 - `uv` resolves `wealthsimpleton` from the local `../Wealthsimpleton` checkout

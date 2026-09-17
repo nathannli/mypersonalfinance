@@ -1,4 +1,4 @@
-import urllib
+import urllib.request
 import argparse
 import os
 import re
@@ -7,7 +7,10 @@ import tempfile
 import polars as pl
 import requests
 
+from config import Config
 from db.parents_finance import ParentsFinanceDB
+from services.categorizer_factory import build_categorizer, write_authorizer_for
+from services.transaction_categorization import TransactionStatus
 
 RPI_IP = "10.20.0.8"
 DISCORD_ALERT_BOT_URL = f"http://{RPI_IP}:30007/alert"
@@ -34,6 +37,15 @@ MERCHANT_SKIP_KEYWORDS = [
     "WH005 TFR-TO 4116036",
     "WH055 TFR-TO C/C",  # chequing account transfers to credit card
 ]
+
+
+def format_totals(totals: dict[TransactionStatus, int]) -> str:
+    return ", ".join(f"{status.value}={totals[status]}" for status in TransactionStatus)
+
+
+def run_status(totals: dict[TransactionStatus, int]) -> str:
+    unfinished = totals[TransactionStatus.SHADOW] + totals[TransactionStatus.UNRESOLVED]
+    return "partial" if unfinished > 0 else "complete"
 
 
 def run(file_path: str, cron: bool, original_file_path: str):
@@ -80,11 +92,19 @@ def run(file_path: str, cron: bool, original_file_path: str):
     # drop rows where cost is negative
     df3 = df2.filter(pl.col("cost") > 0)
 
-    # load parents db
+    config = Config()
+
+    # load parents db (read-only until an outcome insert happens)
     parents_db = ParentsFinanceDB(debug=DEBUG, cron=cron)
 
-    # insert the expenses
-    new_inserted_rows = 0
+    # fail closed before any mutation when write mode is unapproved
+    write_authorizer = write_authorizer_for(
+        config, "parents_finance", parents_db.get_categorization_choices
+    )
+    categorizer = build_categorizer(config, write_authorizer)
+
+    # insert the expenses; every processed row yields exactly one outcome
+    totals = {status: 0 for status in TransactionStatus}
     for i, row in enumerate(df3.iter_rows(named=True)):
         print(f"Processing row {i + 1}/{df3.height}")
         date = row["date"]
@@ -99,35 +119,46 @@ def run(file_path: str, cron: bool, original_file_path: str):
                 # if yes, delete from expenses table
                 expense_id = parents_db.get_expense_id(date, merchant, cost)
                 parents_db.delete_expense(expense_id)
+                totals[TransactionStatus.DELETED] += 1
+            else:
+                totals[TransactionStatus.IGNORED] += 1
             continue
         # if chequing file, skip transactions with chequing-specific keywords
         if chequing_file and any(
             keyword in cc_sub_category for keyword in CHEQUING_SKIP_KEYWORDS
         ):
+            totals[TransactionStatus.IGNORED] += 1
             continue
         # skip transactions with merchant skip keywords
         if any(keyword in merchant for keyword in MERCHANT_SKIP_KEYWORDS):
+            totals[TransactionStatus.IGNORED] += 1
             continue
-        # Check if transaction already exists in expenses table
-        if not parents_db.check_if_expense_exists(date, merchant, cost):
-            print("\n\n")
-            print("New transaction found")
-            return_value = parents_db.insert_expense(date, merchant, cost, cc_category)
-            if return_value:
-                new_inserted_rows += 1
+        outcome = parents_db.insert_expense(
+            date,
+            merchant,
+            cost,
+            cc_category=cc_category,
+            categorizer=categorizer,
+        )
+        totals[outcome.status] += 1
+        if outcome.status == TransactionStatus.UNRESOLVED:
+            print(
+                f"Unresolved: {date} {merchant} "
+                f"({outcome.reason.value if outcome.reason else 'unknown'})"
+            )
 
     print("\n\n")
+    status = run_status(totals)
+    summary = (
+        f"Run {status}: inserted {totals[TransactionStatus.INSERTED]}/{df3.height} "
+        f"rows into parents_finance.expenses for {original_file_path} "
+        f"[{format_totals(totals)}]"
+    )
     if cron:
-        send_discord_message(
-            f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}"
-        )
-        if parents_db.manual_intervention_required_expense_count > 0:
-            message = f"Manual intervention required for {parents_db.manual_intervention_required_expense_count} expenses for {original_file_path}"
-            send_discord_message(message)
+        send_discord_message(summary)
     else:
-        print(
-            f"Successfully inserted {new_inserted_rows}/{df3.height} rows into parents_finance.expenses for {original_file_path}"
-        )
+        print(summary)
+    return totals
 
 
 def obscure_credentials(message):
@@ -157,7 +188,13 @@ def fetch_ftp_file(ftp_url: str) -> str:
     return tmp_file.name
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> int:
+    """Run the Excel load and return the process exit code.
+
+    Exit contract (V37/V39): 0 for complete/partial runs, 1 for any
+    file error, approval abort, or interrupt. Never a bare success exit
+    on the failure path.
+    """
     # Set up argument parser
     parser = argparse.ArgumentParser(
         description="Load credit card data into PostgreSQL database from pre-existing excel file"
@@ -168,7 +205,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cron", required=False, help="boolean, any input will trigger true"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     file_path = args.filepath
     cron = True if args.cron else False
 
@@ -179,15 +216,20 @@ if __name__ == "__main__":
 
     try:
         run(local_file_path, cron, file_path)
+        return 0
     except KeyboardInterrupt:
         print("Keyboard interrupt")
-        exit()
+        return 1
     except Exception as e:
         if cron:
             send_discord_message(f"Error for {file_path}: {e}")
         else:
             print(f"Error for {file_path}: {e}")
-        exit()
+        return 1
     finally:
         if local_file_path != file_path:
             os.remove(local_file_path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

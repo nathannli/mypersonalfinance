@@ -17,6 +17,9 @@ rogers_cc_merchant_category_ref: dict[str, tuple[str, str]] = {
 
 reimbursement_merchant_ref: list[str] = [
     "NEXUS MASSAGE AND REHAB TORONTO",
+    # PS5s bought for a friend, fully reimbursed (user direction 2026-09-17)
+    "STAPLES.CA/48517198128  MISSISSAUGA",
+    "STAPLES.CA/48620392128  MISSISSAUGA",
 ]
 
 simplii_visa_cc_merchant_name_to_category_ref: dict[str, tuple[str, str]] = {

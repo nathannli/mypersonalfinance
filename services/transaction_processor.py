@@ -7,10 +7,13 @@ into the database.
 """
 
 import os
+from collections.abc import Sequence
 
 import polars as pl
 
 from db.finance_base import FinanceDB
+from services.llm_categorizer import OpenCodexCategorizer
+from services.transaction_categorization import TransactionStatus
 from services.transaction_loader import TransactionLoader
 from utils.processing_results import ProcessingResults
 
@@ -23,7 +26,12 @@ class TransactionProcessor:
     and inserting them into the database.
     """
 
-    def __init__(self, database: FinanceDB, loader: TransactionLoader):
+    def __init__(
+        self,
+        database: FinanceDB,
+        loader: TransactionLoader,
+        categorizer: OpenCodexCategorizer,
+    ):
         """
         Initialize transaction processor.
 
@@ -33,8 +41,11 @@ class TransactionProcessor:
         """
         self.database = database
         self.loader = loader
+        self.categorizer = categorizer
 
-    def _insert_transactions(self, df: pl.DataFrame, card_type: str) -> int:
+    def _insert_transactions(
+        self, df: pl.DataFrame, card_type: str
+    ) -> tuple[dict[TransactionStatus, int], list[dict]]:
         """
         Insert transactions from DataFrame into database.
 
@@ -43,9 +54,11 @@ class TransactionProcessor:
             card_type: Type of credit card
 
         Returns:
-            Number of rows inserted
+            Tuple of (typed outcome totals, unresolved row details). Every
+            processed row contributes exactly one typed outcome.
         """
-        new_inserted_rows = 0
+        totals = {status: 0 for status in TransactionStatus}
+        unresolved_rows: list[dict] = []
 
         for row in df.iter_rows(named=True):
             date = row["date"]
@@ -54,20 +67,35 @@ class TransactionProcessor:
             cc_category = row["cc_category"]
 
             # Check if transaction already exists in expenses table
-            if not self.database.check_if_expense_exists(date, merchant, cost):
-                print("\n\n")
-                print("New transaction found")
-                inserted = self.database.insert_expense(
-                    date, merchant, cost, card_type, cc_category
-                )
-                if inserted:
-                    new_inserted_rows += 1
+            if self.database.check_if_expense_exists(date, merchant, cost):
+                totals[TransactionStatus.DUPLICATE] += 1
+                continue
 
-        return new_inserted_rows
+            print("\n\n")
+            print("New transaction found")
+            outcome = self.database.insert_expense(
+                date,
+                merchant,
+                cost,
+                card_type,
+                cc_category,
+                categorizer=self.categorizer,
+            )
+            totals[outcome.status] += 1
+            if outcome.status == TransactionStatus.UNRESOLVED:
+                unresolved_rows.append(
+                    {
+                        "date": date,
+                        "merchant": merchant,
+                        "reason": outcome.reason.value if outcome.reason else "unknown",
+                    }
+                )
+
+        return totals, unresolved_rows
 
     def _process_single_file(
-        self, card_type: str, file_path: str, file_name: str
-    ) -> tuple[int, int]:
+        self, card_type: str, file_path: str | None, file_name: str
+    ) -> tuple[dict[TransactionStatus, int], int, list[dict]]:
         """
         Process a single transaction file.
 
@@ -77,7 +105,7 @@ class TransactionProcessor:
             file_name: Display name for the file
 
         Returns:
-            Tuple of (inserted_rows, total_rows)
+            Tuple of (typed outcome totals, total_rows, unresolved rows)
 
         Raises:
             Exception: If file processing fails
@@ -93,13 +121,15 @@ class TransactionProcessor:
 
         # Insert transactions if DataFrame has data
         if df.height > 0:
-            inserted_rows = self._insert_transactions(df, card_type)
-            return (inserted_rows, df.height)
+            totals, unresolved_rows = self._insert_transactions(df, card_type)
+            return (totals, df.height, unresolved_rows)
         else:
             print("No data to process in the file")
-            return (0, 0)
+            return ({status: 0 for status in TransactionStatus}, 0, [])
 
-    def process_files(self, card_type: str, files: list[str]) -> ProcessingResults:
+    def process_files(
+        self, card_type: str, files: Sequence[str | None]
+    ) -> ProcessingResults:
         """
         Process multiple transaction files.
 
@@ -130,10 +160,10 @@ class TransactionProcessor:
 
             # Process the file
             try:
-                inserted, total = self._process_single_file(
+                totals, total, unresolved_rows = self._process_single_file(
                     card_type, file_path, file_name
                 )
-                results.add_success(file_name, inserted, total)
+                results.add_success(file_name, totals, total, unresolved_rows)
 
             except KeyboardInterrupt:
                 print("Keyboard interrupt")

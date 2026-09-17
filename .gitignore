@@ -21,3 +21,6 @@ trace.zip
 .pi/
 .reposcry/
 .zvec-grep/
+
+.transaction-llm-gold.json
+.transaction-llm-approval.json

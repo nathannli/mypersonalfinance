@@ -18,7 +18,7 @@ class TransactionLoader:
     statement class for each card type.
     """
 
-    def load(self, card_type: str, file_path: str = None) -> pl.DataFrame:
+    def load(self, card_type: str, file_path: str | None = None) -> pl.DataFrame:
         """
         Load credit card statement data based on card type.
 
@@ -37,6 +37,8 @@ class TransactionLoader:
 
         # Instantiate and load data based on whether file is required
         if requires_file(card_type):
+            if file_path is None:
+                raise ValueError(f"Card type {card_type} requires a file input")
             return statement_class(file_path=file_path).get_df()
         else:
             return statement_class().get_df()
