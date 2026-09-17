@@ -146,7 +146,7 @@ wins; a matched transaction makes no provider request.
 ```sh
 OPENCODEX_BASE_URL=http://localhost:10100
 OPENCODEX_API_KEY=<key>
-TRANSACTION_LLM_MODEL=SingularityApiDev/deepseek-v4-flash-0731
+TRANSACTION_LLM_MODEL=anthropic/claude-haiku-4-5
 TRANSACTION_LLM_TIMEOUT_SECONDS=120
 TRANSACTION_LLM_MODE=shadow
 ```
@@ -158,7 +158,7 @@ not need a key.
 
 ### Cloud and proxy trust
 
-`SingularityApiDev/deepseek-v4-flash-0731` is a cloud model. Merchant names,
+`anthropic/claude-haiku-4-5` is a cloud model. Merchant names,
 amounts, and the live category list for the selected database leave the local
 network when an unknown transaction is categorized. The configured OpenCodex
 proxy is the trusted routing boundary: approval binds the normalized proxy URL
