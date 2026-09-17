@@ -44,7 +44,12 @@ def format_totals(totals: dict[TransactionStatus, int]) -> str:
 
 
 def run_status(totals: dict[TransactionStatus, int]) -> str:
-    unfinished = totals[TransactionStatus.SHADOW] + totals[TransactionStatus.UNRESOLVED]
+    # V40: a suggested row is unfinished work, exactly like a shadow row.
+    unfinished = (
+        totals[TransactionStatus.SHADOW]
+        + totals[TransactionStatus.UNRESOLVED]
+        + totals[TransactionStatus.SUGGESTED]
+    )
     return "partial" if unfinished > 0 else "complete"
 
 
@@ -105,6 +110,7 @@ def run(file_path: str, cron: bool, original_file_path: str):
 
     # insert the expenses; every processed row yields exactly one outcome
     totals = {status: 0 for status in TransactionStatus}
+    suggestion_ids = []
     for i, row in enumerate(df3.iter_rows(named=True)):
         print(f"Processing row {i + 1}/{df3.height}")
         date = row["date"]
@@ -141,11 +147,16 @@ def run(file_path: str, cron: bool, original_file_path: str):
             categorizer=categorizer,
         )
         totals[outcome.status] += 1
+        if outcome.suggestion_id:
+            suggestion_ids.append(outcome.suggestion_id)
         if outcome.status == TransactionStatus.UNRESOLVED:
-            print(
-                f"Unresolved: {date} {merchant} "
-                f"({outcome.reason.value if outcome.reason else 'unknown'})"
-            )
+            reason = outcome.reason.value if outcome.reason else "unknown"
+            if cron:
+                # V35: cron output carries the reason only. Merchant detail is
+                # withheld because Discord and cron logs are persistent.
+                print(f"Unresolved: row {i + 1} ({reason})")
+            else:
+                print(f"Unresolved: {date} {merchant} ({reason})")
 
     print("\n\n")
     status = run_status(totals)
@@ -154,6 +165,9 @@ def run(file_path: str, cron: bool, original_file_path: str):
         f"rows into parents_finance.expenses for {original_file_path} "
         f"[{format_totals(totals)}]"
     )
+    if suggestion_ids:
+        # V35: counts plus suggestion identifiers only, never proposals.
+        summary += f" suggestions: {', '.join(sorted(set(suggestion_ids)))}"
     if cron:
         send_discord_message(summary)
     else:

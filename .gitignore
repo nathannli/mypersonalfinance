@@ -24,3 +24,8 @@ trace.zip
 
 .transaction-llm-gold.json
 .transaction-llm-approval.json
+
+.transaction-web-research/
+.transaction-web-research-approvals.json
+.transaction-web-research.lock
+.transaction-category-suggestions.json

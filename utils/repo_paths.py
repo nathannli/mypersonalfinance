@@ -12,6 +12,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_GOLD_FILENAME = ".transaction-llm-gold.json"
 PRIVATE_APPROVAL_FILENAME = ".transaction-llm-approval.json"
 
+# Private transaction-web-enrichment artifacts (V11). Ignore rules for these
+# must exist before any of them is created.
+PRIVATE_RESEARCH_DIRNAME = ".transaction-web-research"
+RESEARCH_REVIEW_FILENAME = ".transaction-web-research-approvals.json"
+RESEARCH_LOCK_FILENAME = ".transaction-web-research.lock"
+SUGGESTION_FILENAME = ".transaction-category-suggestions.json"
+
 
 def repo_root() -> Path:
     """Return the repository root, independent of the process CWD."""

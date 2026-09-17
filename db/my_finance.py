@@ -1,14 +1,36 @@
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import date
+from functools import partial
 
 import polars as pl
 
 from sources.ref_data import reimbursement_merchant_ref
-from sources.csv.rogers import RogersStatement
-from sources.csv.simplii_visa import SimpliiVisaStatement
 from db.finance_base import FinanceDB
-from services.llm_categorizer import OpenCodexCategorizer
+from services.deterministic_categorization import (
+    DeterministicOutcome,
+    find_exact_auto_match,
+    find_substring_auto_match,
+    resolve_deterministic_choice,
+)
+from services.enriched_categorization import (
+    PacketResolution,
+    resolve_approved_packet,
+)
+from services.llm_categorizer import (
+    EnrichedAbstain,
+    EnrichedDecision,
+    EnrichedSelect,
+    EnrichedSuggestion,
+    OpenCodexCategorizer,
+)
+from services.research_packets import (
+    CategorySuggestion,
+    ResearchPacket,
+    record_suggestion,
+)
 from services.transaction_categorization import (
-    ProviderAction,
+    CanonicalContext,
     Resolution,
     TransactionOutcome,
     TransactionStatus,
@@ -24,8 +46,21 @@ class MyFinanceDB(FinanceDB):
     # so subclasses that skip __init__ still observe the lazy cache.
     _categorization_choices: list[dict[str, object]] | None = None
 
-    def __init__(self, debug: bool = False):
+    def __init__(
+        self,
+        debug: bool = False,
+        packet_resolver: Callable[[str], PacketResolution] | None = None,
+        suggestion_recorder: Callable[[CategorySuggestion], CategorySuggestion]
+        | None = None,
+    ):
         super().__init__(database_name="finance", debug=debug)
+        # V15/V47: the frozen-packet gate is injectable so tests can exercise
+        # packet states without a live store root. Defaults to the read-only
+        # resolver, which writes nothing and never calls TinyFish.
+        self._packet_resolver = packet_resolver or resolve_approved_packet
+        # V22/V24: the grouped-suggestion writer is injectable the same way so
+        # tests never touch the repository-root private artifact.
+        self._suggestion_recorder = suggestion_recorder or record_suggestion
 
     def get_subcategory_and_category(self) -> pl.DataFrame:
         """
@@ -77,37 +112,12 @@ class MyFinanceDB(FinanceDB):
             for reimbursement_merchant in reimbursement_merchant_ref
         )
 
-    def _get_reference_category(
-        self, merchant: str, card_type: str, cc_category: str | None
-    ) -> tuple[str, str] | None:
-        if card_type == "rogers" and cc_category is not None:
-            reference = RogersStatement.auto_match_category(cc_category)
-            return reference or self.get_auto_match_category(merchant)
-        if card_type == "simplii_visa":
-            return SimpliiVisaStatement.auto_match_category()
-        return self.get_auto_match_category(merchant)
-
-    @staticmethod
-    def _find_reference_choice(
-        choices: list[dict[str, object]], reference: tuple[str, str]
-    ) -> dict[str, object] | None:
-        category, subcategory = reference
-        matches = [
-            choice
-            for choice in choices
-            if choice["category_name"] == category
-            and choice["subcategory_name"] == subcategory
-        ]
-        if len(matches) != 1:
-            return None
-        return matches[0]
-
     def _insert_choice(
         self,
         date: date,
         merchant: str,
         cost: float,
-        choice: dict[str, object],
+        choice: Mapping[str, object],
         resolution: Resolution,
     ) -> TransactionOutcome:
         category_id = choice["category_id"]
@@ -152,31 +162,22 @@ class MyFinanceDB(FinanceDB):
             )
 
         choices = self.get_categorization_choices()
-        try:
-            reference = self._get_reference_category(merchant, card_type, cc_category)
-        except ValueError:
+        deterministic = resolve_deterministic_choice(
+            card_type=card_type,
+            cc_category=cc_category,
+            choices=choices,
+            auto_match=partial(self.get_auto_match_category, merchant),
+        )
+        if deterministic.outcome is DeterministicOutcome.INVALID_MAPPING:
             return TransactionOutcome(
                 TransactionStatus.UNRESOLVED,
                 Resolution.DETERMINISTIC,
                 UnresolvedReason.INVALID_CHOICE,
             )
-
-        if reference is not None:
-            choice = self._find_reference_choice(choices, reference)
-            if choice is None:
-                return TransactionOutcome(
-                    TransactionStatus.UNRESOLVED,
-                    Resolution.DETERMINISTIC,
-                    UnresolvedReason.INVALID_CHOICE,
-                )
+        if deterministic.outcome is DeterministicOutcome.MATCHED:
+            assert deterministic.choice is not None
             return self._insert_choice(
-                date, merchant, cost, choice, Resolution.DETERMINISTIC
-            )
-
-        if categorizer is None:
-            return TransactionOutcome(
-                TransactionStatus.UNRESOLVED,
-                reason=UnresolvedReason.PROVIDER_ERROR,
+                date, merchant, cost, deterministic.choice, Resolution.DETERMINISTIC
             )
 
         try:
@@ -193,54 +194,131 @@ class MyFinanceDB(FinanceDB):
                 reason=UnresolvedReason.INVALID_CONTEXT,
             )
 
-        result = categorizer.categorize(context)
-        if result.action != ProviderAction.SELECT or result.choice_id is None:
+        # The frozen packet gates the enriched path. Its state reasons surface
+        # even with no provider client configured, and a packet that is missing,
+        # stale, tampered or unapproved never falls back to unenriched
+        # categorization (V15, V25, V55).
+        resolution = self._packet_resolver(context.merchant)
+        if resolution.packet is None:
             return TransactionOutcome(
                 TransactionStatus.UNRESOLVED,
-                reason=result.reason or UnresolvedReason.MALFORMED,
+                reason=resolution.reason,
+            )
+        packet = resolution.packet
+
+        # Bind the approved packet into the context *after* resolution: the
+        # fingerprint shared by the cache, the gold set and the approval record
+        # is the packet-bound one (V30), and the categorizer refuses any
+        # context whose packet identity does not match the packet it is given.
+        # The unbound context above still owns amount validation and the
+        # normalized-merchant lookup, so both happen exactly once.
+        context = replace(
+            context,
+            research_packet_sha256=packet.packet_sha256,
+            research_packet_schema_version=packet.schema_version,
+            research_packet_query_version=packet.query_version,
+        )
+
+        if categorizer is None:
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                reason=UnresolvedReason.PROVIDER_ERROR,
             )
 
-        choice = next(
-            (item for item in choices if item["subcategory_id"] == result.choice_id),
-            None,
-        )
-        if choice is None:
+        execution = categorizer.categorize_enriched(context, packet)
+        if execution.decision is None:
             return TransactionOutcome(
                 TransactionStatus.UNRESOLVED,
-                reason=UnresolvedReason.INVALID_CHOICE,
+                reason=execution.reason or UnresolvedReason.MALFORMED,
             )
-        if not categorizer.can_write(context, result.choice_id):
+        return self._apply_enriched_decision(
+            date,
+            merchant,
+            cost,
+            choices,
+            context,
+            packet,
+            execution.decision,
+            categorizer,
+        )
+
+    def _apply_enriched_decision(
+        self,
+        date: date,
+        merchant: str,
+        cost: float,
+        choices: list[dict[str, object]],
+        context: CanonicalContext,
+        packet: ResearchPacket,
+        decision: EnrichedDecision,
+        categorizer: OpenCodexCategorizer | None = None,
+    ) -> TransactionOutcome:
+        """Map one validated enriched decision to exactly one outcome (V25)."""
+        if isinstance(decision, EnrichedAbstain):
             return TransactionOutcome(
-                TransactionStatus.SHADOW,
+                TransactionStatus.UNRESOLVED,
                 Resolution.LLM,
-                suggested_choice_id=result.choice_id,
+                UnresolvedReason.ABSTAINED,
             )
-        return self._insert_choice(date, merchant, cost, choice, Resolution.LLM)
+
+        if isinstance(decision, EnrichedSuggestion):
+            # V19/V21/V22: review-only. The proposal is persisted before the
+            # outcome is reported, so a row is never counted as suggested
+            # without a stored grouped proposal; a store failure propagates
+            # rather than reporting an unpersisted suggestion.
+            suggestion = CategorySuggestion(
+                normalized_merchant=context.merchant,
+                category_name=decision.category_name,
+                subcategory_name=decision.subcategory_name,
+                parent_category_id=decision.parent_category_id,
+                rationale=decision.rationale,
+                evidence_urls=decision.evidence_urls,
+                research_packet_sha256=packet.packet_sha256,
+                context_fingerprints=(context.fingerprint,),
+            )
+            stored = self._suggestion_recorder(suggestion)
+            return TransactionOutcome(
+                TransactionStatus.SUGGESTED,
+                Resolution.LLM,
+                suggestion_id=stored.suggestion_id,
+            )
+
+        assert isinstance(decision, EnrichedSelect)
+        authorized_choice = next(
+            (item for item in choices if item["subcategory_id"] == decision.choice_id),
+            None,
+        )
+        if authorized_choice is None:
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                Resolution.LLM,
+                UnresolvedReason.INVALID_CHOICE,
+            )
+        # V33: write mode authorizes only an exact approved select for this
+        # context, packet hash and choice. Every other selection stays shadow.
+        if categorizer is not None and categorizer.can_write_enriched(
+            context, packet, decision.choice_id
+        ):
+            return self._insert_choice(
+                date, merchant, cost, authorized_choice, Resolution.LLM
+            )
+        return TransactionOutcome(
+            TransactionStatus.SHADOW,
+            Resolution.LLM,
+            suggested_choice_id=decision.choice_id,
+        )
 
     def get_auto_match_category(self, merchant: str) -> tuple[str, str] | None:
         """
         Get the category and subcategory for the merchant.
         """
         query = "select merchant_category, merchant_subcategory from merchant_name_auto_match where merchant_name = %s"
-        result = self.select(query, (merchant,))
-        if len(result) > 1:
-            raise ValueError(
-                f"Multiple categories found for {merchant}. Something is wrong."
-            )
-        elif len(result) == 1:
-            return result[0]
-        else:
-            # try substring auto match
-            query = "select substring, merchant_category, merchant_subcategory from substring_auto_match"
-            result = self.select(query)
-            substring_matches = list()
-            for item in result:
-                if item[0] in merchant.lower():
-                    substring_matches.append((item[1], item[2]))
-            if len(substring_matches) >= 1:
-                return substring_matches[0]
-            else:
-                return None
+        exact = find_exact_auto_match(merchant, self.select(query, (merchant,)))
+        if exact is not None:
+            return exact
+        # try substring auto match
+        query = "select substring, merchant_category, merchant_subcategory from substring_auto_match"
+        return find_substring_auto_match(merchant, self.select(query))
 
     def insert_into_auto_match(
         self, merchant: str, category: str, subcategory: str
