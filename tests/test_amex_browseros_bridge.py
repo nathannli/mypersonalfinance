@@ -25,6 +25,18 @@ class FakeBrowserOS(AbstractAsyncContextManager):
         return next(self.responses)
 
 
+class RepeatingBrowserOS(FakeBrowserOS):
+    """FakeBrowserOS that answers every call with the same response."""
+
+    def __init__(self, response):
+        super().__init__([])
+        self.response = response
+
+    async def call(self, tool_name, arguments):
+        self.calls.append((tool_name, arguments))
+        return self.response
+
+
 class TestAmexBrowserOSBridge(unittest.TestCase):
     def test_uses_neo_default_mcp_endpoint(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -203,6 +215,89 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
         self.assertEqual(ref, "e72")
         self.assertEqual([call[0] for call in browser.calls], ["snapshot", "snapshot"])
 
+    def test_statement_archive_ref_finds_collapsed_previous_statements(self):
+        self.assertEqual(
+            bridge.statement_archive_ref(
+                '- button "Previous Statements" [collapsed] [ref=e76]'
+            ),
+            "e76",
+        )
+
+    def test_statement_archive_ref_absent_when_section_missing(self):
+        self.assertIsNone(
+            bridge.statement_archive_ref(
+                '- button "Recent Statements" [expanded] [ref=e62]'
+            )
+        )
+
+    def test_statement_archive_ref_ignores_already_expanded_section(self):
+        """Clicking an expanded toggle would collapse it and hide the months."""
+        self.assertIsNone(
+            bridge.statement_archive_ref(
+                '- button "Previous Statements" [expanded] [ref=e76]'
+            )
+        )
+
+    def test_expands_previous_statements_to_reach_archived_month(self):
+        """
+        A month older than the recent window is only reachable after the
+        collapsed archive section is expanded.
+        """
+        browser = FakeBrowserOS(
+            [
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]
+- button "Download 28 March 2026 Statement" [ref=e74]""",
+                "clicked",
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [expanded] [ref=e76]
+- button "Download 28 February 2026 Statement" [ref=e99]""",
+            ]
+        )
+
+        _, ref = asyncio.run(bridge.statement_snapshot_for_month(browser, 3, "2026-02"))
+
+        self.assertEqual(ref, "e99")
+        self.assertEqual(
+            [(call[0], call[1].get("kind")) for call in browser.calls],
+            [("snapshot", None), ("act", "click"), ("snapshot", None)],
+        )
+        self.assertEqual(browser.calls[1][1]["ref"], "e76")
+
+    def test_expands_archive_only_once_across_polls(self):
+        """The toggle must not be clicked repeatedly while the month is absent."""
+        browser = FakeBrowserOS(
+            [
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]""",
+                "clicked",
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]""",
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Download 28 February 2026 Statement" [ref=e99]""",
+            ]
+        )
+
+        _, ref = asyncio.run(bridge.statement_snapshot_for_month(browser, 3, "2026-02"))
+
+        self.assertEqual(ref, "e99")
+        clicks = [c for c in browser.calls if c[0] == "act"]
+        self.assertEqual(len(clicks), 1)
+
+    def test_no_archive_click_when_month_is_already_visible(self):
+        browser = FakeBrowserOS(
+            [
+                """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements]
+- button "Previous Statements" [collapsed] [ref=e76]
+- button "Download 28 February 2026 Statement" [ref=e99]""",
+            ]
+        )
+
+        _, ref = asyncio.run(bridge.statement_snapshot_for_month(browser, 3, "2026-02"))
+
+        self.assertEqual(ref, "e99")
+        self.assertEqual([call[0] for call in browser.calls], ["snapshot"])
+
     def test_v24_identifies_authenticated_dashboard(self):
         self.assertTrue(
             bridge.is_authenticated_page(
@@ -331,6 +426,7 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
                     None,
                     dialog,
                     {"path": str(downloaded)},
+                    "[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/]",
                 ]
             )
             with patch.dict(
@@ -345,7 +441,7 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
             ):
                 result = asyncio.run(
                     bridge.run_download(
-                        str(output_dir), session_factory=lambda _: browser
+                        str(output_dir), session_factory=lambda endpoint: browser
                     )
                 )
 
@@ -366,8 +462,9 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
         dialog = """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/]
 - radio \"CSV\" [ref=e21]
 - link \"Download\" [ref=e22]"""
+        closed = "[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/]"
         browser = FakeBrowserOS(
-            [ready, None, dialog, None, dialog, {"path": "/tmp/activity.csv"}]
+            [ready, None, dialog, None, dialog, {"path": "/tmp/activity.csv"}, closed]
         )
 
         with patch.object(
@@ -377,6 +474,114 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
 
         self.assertEqual(downloaded, Path("/tmp/activity.csv"))
         self.assertEqual(browser.calls[0], ("snapshot", {"page": 3}))
+
+    def test_export_waits_for_export_dialog_to_close(self):
+        """
+        The export dialog is a full-viewport overlay; returning while it is
+        still up leaves the next statement's download button unclickable.
+        """
+        dialog = """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements/]
+- radio \"CSV\" [ref=e21]
+- link \"Download\" [ref=e22]"""
+        closed = "[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements/]"
+        browser = FakeBrowserOS(
+            [
+                None,
+                dialog,
+                None,
+                dialog,
+                {"path": "/tmp/activity.csv"},
+                dialog,
+                closed,
+            ]
+        )
+
+        with patch.object(
+            bridge, "download_path", return_value=Path("/tmp/activity.csv")
+        ):
+            downloaded = asyncio.run(bridge.export_csv(browser, 3, closed, ref="e70"))
+
+        self.assertEqual(downloaded, Path("/tmp/activity.csv"))
+        self.assertEqual(
+            [call[0] for call in browser.calls],
+            ["act", "snapshot", "act", "snapshot", "download", "snapshot", "snapshot"],
+        )
+
+    @patch.object(bridge, "ACTION_TIMEOUT_SECONDS", 0.05)
+    def test_export_fails_when_export_dialog_never_closes(self):
+        dialog = """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements/]
+- radio \"CSV\" [ref=e21]
+- link \"Download\" [ref=e22]"""
+        browser = RepeatingBrowserOS(dialog)
+
+        with patch.object(
+            bridge, "download_path", return_value=Path("/tmp/activity.csv")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "export dialog to close"):
+                asyncio.run(bridge.export_csv(browser, 3, dialog, ref="e70"))
+
+    def test_export_statement_retries_when_previous_dialog_still_covers_button(self):
+        """
+        The export dialog can outlive its own download, leaving the next
+        month's button covered until the overlay finishes fading out.
+        """
+        statements = """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements/]
+- button \"Download 28 August 2026 Statement\" [ref=e64]"""
+        dialog = """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements/]
+- radio \"CSV\" [ref=e21]
+- link \"Download\" [ref=e22]"""
+        closed = "[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements/]"
+        covered = (
+            'act failed: Element e64 (button "Download 28 August 2026 Statement") '
+            "is covered by <button.flex> at its click point"
+        )
+
+        class CoveringOnce(FakeBrowserOS):
+            def __init__(self, responses):
+                super().__init__(responses)
+                self.clicks = 0
+
+            async def call(self, tool_name, arguments):
+                if tool_name == "act" and arguments.get("kind") == "click":
+                    self.clicks += 1
+                    if self.clicks == 1:
+                        self.calls.append((tool_name, arguments))
+                        raise RuntimeError(covered)
+                return await super().call(tool_name, arguments)
+
+        browser = CoveringOnce(
+            [
+                statements,
+                statements,
+                None,
+                dialog,
+                None,
+                dialog,
+                {"path": "/tmp/a.csv"},
+                closed,
+            ]
+        )
+
+        with patch.object(bridge, "download_path", return_value=Path("/tmp/a.csv")):
+            downloaded = asyncio.run(bridge.export_statement_csv(browser, 3, "2026-08"))
+
+        self.assertEqual(downloaded, Path("/tmp/a.csv"))
+        self.assertGreaterEqual(browser.clicks, 2)
+
+    def test_export_statement_propagates_unrelated_click_failure(self):
+        statements = """[UNTRUSTED_PAGE_CONTENT origin=https://global.americanexpress.com/activity/statements/]
+- button \"Download 28 August 2026 Statement\" [ref=e64]"""
+
+        class AlwaysFailing(FakeBrowserOS):
+            async def call(self, tool_name, arguments):
+                if tool_name == "act":
+                    raise RuntimeError("Amex page changed: no Download")
+                return await super().call(tool_name, arguments)
+
+        browser = AlwaysFailing([statements])
+
+        with self.assertRaisesRegex(RuntimeError, "no Download"):
+            asyncio.run(bridge.export_statement_csv(browser, 3, "2026-08"))
 
     def test_missing_credentials_are_actionable_without_values(self):
         with patch.dict(os.environ, {}, clear=True):
