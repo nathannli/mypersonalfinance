@@ -18,9 +18,11 @@ from sources.registry import (
 )
 from db.my_finance import MyFinanceDB
 from db.parents_finance import ParentsFinanceDB
-from services.categorizer_factory import build_categorizer, write_authorizer_for
+from services.categorizer_factory import build_categorizer, write_authorizers_for
+from services.enriched_categorization import resolve_approved_packet
 from services.llm_categorizer import OpenCodexCategorizer
 from services.transaction_loader import TransactionLoader
+from services.transaction_llm_approval import ENRICHED_GOLD_DATABASE
 from services.transaction_processor import TransactionProcessor
 
 
@@ -170,9 +172,24 @@ Supported card types:
 
     @staticmethod
     def _build_categorizer(
-        config: Config, write_authorizer=None
+        config: Config,
+        database_name: str,
+        write_authorizer=None,
+        enriched_write_authorizer=None,
     ) -> OpenCodexCategorizer:
-        return build_categorizer(config, write_authorizer)
+        """Build the categorizer for one database's protocol.
+
+        Enriched ``finance`` calls ``ENRICHED_TRANSACTION_LLM_MODEL``;
+        ``parents_finance`` keeps ``TRANSACTION_LLM_MODEL`` (V51).
+        """
+        model = (
+            config.enriched_transaction_llm_model
+            if database_name == ENRICHED_GOLD_DATABASE
+            else None
+        )
+        return build_categorizer(
+            config, write_authorizer, enriched_write_authorizer, model=model
+        )
 
     def _get_database_instance(self, database_name: str):
         """
@@ -227,11 +244,18 @@ Supported card types:
             database = self._get_database_instance(database_name)
             print("Database loaded\n")
 
-            # Fail closed before any mutation when write mode is unapproved
-            write_authorizer = write_authorizer_for(
-                config, database_name, database.get_categorization_choices
+            # Fail closed before any mutation when write mode is unapproved.
+            # Enriched finance is gated by packet-bound approval; parents_finance
+            # keeps the unenriched gate.
+            authorizers = write_authorizers_for(
+                config,
+                database_name,
+                database.get_categorization_choices,
+                packet_resolver=resolve_approved_packet,
             )
-            categorizer = self._build_categorizer(config, write_authorizer)
+            categorizer = self._build_categorizer(
+                config, database_name, authorizers.legacy, authorizers.enriched
+            )
 
             # Initialize services
             loader = TransactionLoader()

@@ -10,6 +10,7 @@ class Config:
     opencodex_base_url: str
     opencodex_api_key: str
     transaction_llm_model: str
+    enriched_transaction_llm_model: str
     transaction_llm_timeout_seconds: float
     transaction_llm_mode: str
     debug: bool
@@ -29,6 +30,12 @@ class Config:
         self.transaction_llm_model = os.getenv(
             "TRANSACTION_LLM_MODEL",
             "SingularityApiDev/deepseek-v4-flash-0731",
+        )
+        # Enriched finance reads its own model so pinning the enriched default
+        # never changes TRANSACTION_LLM_MODEL or the parents_finance path (V51).
+        self.enriched_transaction_llm_model = os.getenv(
+            "ENRICHED_TRANSACTION_LLM_MODEL",
+            "anthropic/claude-haiku-4-5",
         )
         timeout_value = os.getenv("TRANSACTION_LLM_TIMEOUT_SECONDS", "120")
         try:

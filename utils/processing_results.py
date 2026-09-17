@@ -31,6 +31,7 @@ class ProcessingResults:
         self.failed_files = []
         self.totals = {status: 0 for status in TransactionStatus}
         self.unresolved_rows = []
+        self.suggestion_ids = []
 
     def add_success(
         self,
@@ -38,6 +39,7 @@ class ProcessingResults:
         totals: Mapping[TransactionStatus, int],
         total: int,
         unresolved_rows: Sequence[dict] = (),
+        suggestion_ids: Sequence[str] = (),
     ) -> None:
         """
         Record a successful file processing.
@@ -47,6 +49,7 @@ class ProcessingResults:
             totals: Count of each typed outcome produced by the file
             total: Total number of transactions in the file
             unresolved_rows: Reason/merchant/date for each unresolved row
+            suggestion_ids: Suggestion ids produced by the file
 
         Raises:
             ValueError: If the typed outcomes do not reconcile to `total`
@@ -60,6 +63,10 @@ class ProcessingResults:
         for status, count in totals.items():
             self.totals[status] += count
         self.unresolved_rows.extend(unresolved_rows)
+        # V35: identifiers only; full proposals stay in the private artifact.
+        for suggestion_id in suggestion_ids:
+            if suggestion_id not in self.suggestion_ids:
+                self.suggestion_ids.append(suggestion_id)
         self.results.append(
             {
                 "file": file_name,
@@ -117,9 +124,12 @@ class ProcessingResults:
         """Return `complete`, `partial`, or `failed` for the whole run."""
         if self.has_failures():
             return RUN_FAILED
+        # V40: a suggested row is unfinished work, exactly like a shadow row,
+        # so a run that only produced suggestions is never `complete`.
         unfinished = (
             self.totals[TransactionStatus.SHADOW]
             + self.totals[TransactionStatus.UNRESOLVED]
+            + self.totals[TransactionStatus.SUGGESTED]
         )
         return RUN_PARTIAL if unfinished > 0 else RUN_COMPLETE
 
@@ -166,6 +176,13 @@ class ProcessingResults:
                     f"  - {unresolved['date']} {unresolved['merchant']}: "
                     f"{unresolved['reason']}"
                 )
+
+        if self.suggestion_ids:
+            # V35: the local summary reports suggestion identifiers only. The
+            # full proposal and its citations stay in the private artifact.
+            print(f"\n{len(self.suggestion_ids)} category suggestion(s):")
+            for suggestion_id in self.suggestion_ids:
+                print(f"  - {suggestion_id}")
 
         print(
             f"\nTotal: {self.get_total_inserted()}/{self.get_total_transactions()} "
