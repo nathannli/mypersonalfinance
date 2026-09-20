@@ -412,9 +412,22 @@ def _evidence_failure(
 
 
 def _failure_packet(target: ResearchTarget, reason: UnresolvedReason) -> ResearchPacket:
+    """A failed packet records the derived term the run actually used (V44).
+
+    Derivation is pure, so it is recomputed here instead of threaded through
+    the failure path. A descriptor that derives nothing usable has no search
+    term to record, so the field stays empty rather than echoing the raw
+    descriptor, which V44 forbids as a query.
+    """
+
+    try:
+        derived_query = derive_query(target.normalized_merchant)
+    except ResearchIrrelevantError:
+        derived_query = ""
+
     return ResearchPacket(
         normalized_merchant=target.normalized_merchant,
-        derived_query=target.normalized_merchant,
+        derived_query=derived_query,
         status=PacketStatus.FAILED,
         searched_at=utc_now(),
         failure_reason=reason,
