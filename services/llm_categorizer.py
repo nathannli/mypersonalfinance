@@ -497,11 +497,13 @@ def build_enriched_request_bytes(
     return canonical_json_bytes(build_enriched_request_payload(context, packet, model))
 
 
-def _protocol_text(value: object, field: str, limit: int) -> str:
-    """Untrusted model text: a bounded, non-blank string without control characters.
+def _normalized_protocol_text(value: object, field: str) -> str:
+    """Untrusted model text: non-blank, whitespace-collapsed, no control chars.
 
     Mirrors the store's ``_bounded_text`` semantics (NFKC is applied later, only
-    for taxonomy comparison) without importing the private helper.
+    for taxonomy comparison) without importing the private helper. Bounding is
+    the caller's decision: a taxonomy name is rejected when over-long, while
+    informational prose is truncated.
     """
     if not isinstance(value, str):
         raise ResponseValidationError(
@@ -516,11 +518,33 @@ def _protocol_text(value: object, field: str, limit: int) -> str:
         raise ResponseValidationError(
             UnresolvedReason.MALFORMED, f"{field} must not be blank"
         )
+    return normalized
+
+
+def _protocol_text(value: object, field: str, limit: int) -> str:
+    """A bounded taxonomy name: over-long input is rejected, never truncated.
+
+    A truncated name would silently propose a different category, so names keep
+    a strict bound where prose does not (see :func:`_protocol_prose`).
+    """
+    normalized = _normalized_protocol_text(value, field)
     if len(normalized) > limit:
         raise ResponseValidationError(
             UnresolvedReason.MALFORMED, f"{field} must be at most {limit} characters"
         )
     return normalized
+
+
+def _protocol_prose(value: object, field: str, limit: int) -> str:
+    """Bounded informational prose: over-long input is truncated to the bound.
+
+    The provider does not enforce the response schema's ``maxLength``, so
+    rejecting an over-long value here would discard a verbose but otherwise
+    valid abstain or rationale and could open the run circuit behind it. This
+    text never drives matching or a write (V23), so the bound is applied by
+    truncation while taxonomy names stay strict.
+    """
+    return _normalized_protocol_text(value, field)[:limit]
 
 
 def _comparison_key(value: str) -> str:
@@ -530,11 +554,25 @@ def _comparison_key(value: str) -> str:
 
 
 def _validated_citations(value: object, packet: ResearchPacket) -> tuple[str, ...]:
+    """Citations resolved onto the packet's own retained Search URLs (V10, V18).
+
+    A trailing slash is a formatting difference rather than a different source,
+    so ``https://acme.example`` resolves to ``https://acme.example/`` when that
+    is the packet's spelling. Resolution only ever maps onto the closed
+    permitted set, so it cannot widen citable evidence: an unknown URL is still
+    rejected, and the stored citation is always the packet's exact URL.
+    """
+
     if not isinstance(value, list):
         raise ResponseValidationError(
             UnresolvedReason.MALFORMED, "evidence_urls must be an array"
         )
-    urls: list[str] = []
+    permitted = allowed_citation_urls(packet)
+    # Sorted so a deterministic spelling wins if two packet URLs differ only by
+    # a trailing slash.
+    by_variant = {url.rstrip("/"): url for url in sorted(permitted)}
+
+    candidates: list[str] = []
     for entry in value:
         if not isinstance(entry, str):
             raise ResponseValidationError(
@@ -546,24 +584,30 @@ def _validated_citations(value: object, packet: ResearchPacket) -> tuple[str, ..
                 UnresolvedReason.MALFORMED,
                 "evidence_urls entries must be absolute http/https URLs",
             )
-        urls.append(entry)
-    if len(set(urls)) != len(urls):
-        raise ResponseValidationError(
-            UnresolvedReason.MALFORMED, "evidence_urls must be unique"
-        )
-    if not MIN_EVIDENCE_URLS <= len(urls) <= MAX_EVIDENCE_URLS:
+        candidates.append(entry)
+    # The list-length rule is structural, so it is decided before membership: an
+    # oversized list is malformed whether or not its URLs are citable.
+    if not MIN_EVIDENCE_URLS <= len(candidates) <= MAX_EVIDENCE_URLS:
         raise ResponseValidationError(
             UnresolvedReason.MALFORMED,
             f"evidence_urls must hold {MIN_EVIDENCE_URLS}-{MAX_EVIDENCE_URLS} URLs",
         )
-    permitted = allowed_citation_urls(packet)
-    for url in urls:
-        if url not in permitted:
+
+    resolved: list[str] = []
+    for entry in candidates:
+        exact = entry if entry in permitted else by_variant.get(entry.rstrip("/"))
+        if exact is None:
             raise ResponseValidationError(
                 UnresolvedReason.INVALID_CHOICE,
                 "cited URL does not appear in the research packet",
             )
-    return tuple(urls)
+        resolved.append(exact)
+    # Deduplicated after resolution, so two spellings of one source count once.
+    if len(set(resolved)) != len(resolved):
+        raise ResponseValidationError(
+            UnresolvedReason.MALFORMED, "evidence_urls must be unique"
+        )
+    return tuple(resolved)
 
 
 def _validate_taxonomy_proposal(
@@ -661,7 +705,7 @@ def _parse_enriched_suggestion(
     subcategory_name = _protocol_text(
         parsed["subcategory_name"], "subcategory_name", MAX_SUGGESTION_NAME_CHARS
     )
-    rationale = _protocol_text(
+    rationale = _protocol_prose(
         parsed["rationale"], "rationale", MAX_SUGGESTION_RATIONALE_CHARS
     )
     parent_category_id = parsed["parent_category_id"]
@@ -694,7 +738,7 @@ def _parse_enriched_abstain(
             UnresolvedReason.MALFORMED,
             "abstain response must contain exactly action and reason",
         )
-    reason = _protocol_text(parsed["reason"], "reason", MAX_SUGGESTION_RATIONALE_CHARS)
+    reason = _protocol_prose(parsed["reason"], "reason", MAX_SUGGESTION_RATIONALE_CHARS)
     return EnrichedAbstain(reason=reason, context_fingerprint=context.fingerprint)
 
 
