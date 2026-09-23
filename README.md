@@ -160,6 +160,15 @@ provider or model fallback. A missing or empty `OPENCODEX_API_KEY` becomes a
 `provider_error` on the first LLM call, so deterministic-only runs do not need a
 key.
 
+`OPENCODEX_BASE_URL` is part of the enriched write approval identity (V30), and
+only trailing slashes and surrounding whitespace are normalized. Host spelling
+and port are significant, so `http://127.0.0.1:10102` and
+`http://localhost:10102` are different identities and only the exact approved
+string verifies. The macmini reaches opencodex on the unauthenticated loopback
+listener at `http://127.0.0.1:10102`; external ssh hosts use the token-gated LAN
+listener on `10100`. Changing this value invalidates the existing enriched
+approval and requires a fresh three-pass gate.
+
 ### Research-first workflow
 
 Enriched `finance` categorization answers unknown merchants from frozen,
