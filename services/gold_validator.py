@@ -11,7 +11,10 @@ The validator performs no database writes and never sends the expected
 result to the provider.
 """
 
+import contextlib
 import json
+import os
+import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -297,6 +300,37 @@ def run_enriched_validation(
     return validation
 
 
+def _atomic_write_text(path: Path, payload: str) -> None:
+    """temp file + fsync + atomic replace, matching the research store (V50).
+
+    This record authorizes writes, so a crash must leave the previous record
+    intact rather than a truncated one. A truncated record already fails closed
+    on read, but destroying a valid approval is not worth the risk.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+
+    with contextlib.suppress(OSError):
+        directory = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+
 def write_approval_record(
     database: str,
     base_url: str,
@@ -327,9 +361,7 @@ def write_approval_record(
     record["approved_at"] = datetime.now(UTC).isoformat()
     document[database] = record
 
-    path.write_text(
-        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    _atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     return path
 
 
@@ -367,7 +399,5 @@ def write_enriched_approval_record(
     record["approved_at"] = datetime.now(UTC).isoformat()
     document[ENRICHED_APPROVAL_KEY] = record
 
-    path.write_text(
-        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    _atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     return path

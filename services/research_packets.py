@@ -887,8 +887,15 @@ def store_packet(packet: ResearchPacket, *, root: Path | None = None) -> Path:
 
     path = packet_path_for(packet.packet_id, root=root)
     with research_writer_lock(root=root):
-        _atomic_write(path, _canonical_bytes(packet.as_dict()))
+        # Order matters, because these are two independent atomic writes. A
+        # crash between them must never leave a new packet carrying a record
+        # that still approves the superseded hash: the load path would reject
+        # that pairing, but the review listing would report the packet approved
+        # and never offer it for re-review. Discarding first inverts the
+        # residual state to "previous packet, no record", which reads as
+        # pending and fails closed.
         _discard_review_record(packet.packet_id, root=root)
+        _atomic_write(path, _canonical_bytes(packet.as_dict()))
     return path
 
 

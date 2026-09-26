@@ -166,10 +166,13 @@ def list_packets() -> int:
             # V55: failure packets are never reviewable.
             failed += 1
             continue
-        record = review_record_for(packet_id)
-        if record is None:
+        if is_pending(packet):
+            # A record that no longer binds this exact hash is pending too, so
+            # a packet whose approval was superseded is never reported approved.
             pending.append(packet)
-        elif record.status is PacketReviewStatus.APPROVED:
+            continue
+        record = review_record_for(packet_id)
+        if record is not None and record.status is PacketReviewStatus.APPROVED:
             approved += 1
         else:
             rejected += 1
