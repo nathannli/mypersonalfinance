@@ -1,0 +1,209 @@
+{
+  "_comment": "Synthetic enriched fixture only. No real merchant, packet, evidence, URL, amount, account, or category data.",
+  "cases": [
+    {
+      "amount_minor_units": 1250,
+      "database": "finance",
+      "expected_action": "select",
+      "expected_category_name": null,
+      "expected_choice_id": 101,
+      "expected_evidence_urls": null,
+      "expected_parent_category_id": null,
+      "expected_subcategory_name": null,
+      "fingerprint": "8305e4d8ec2fe0af03eaeb085e02fb2b83e5a86892756502932a91d6630232dd",
+      "merchant": "example alpha cafe",
+      "packet_query_version": "merchant-research-v2",
+      "packet_schema_version": "transaction-web-research-v1",
+      "research_packet_sha256": "06496575fc8d5c7d69542699ace31d14fac13b8a90b8539b737d94db13b362cc",
+      "statement_category": "sample restaurants"
+    },
+    {
+      "amount_minor_units": 9900,
+      "database": "finance",
+      "expected_action": "suggest_new",
+      "expected_category_name": "Sample Hobbies",
+      "expected_choice_id": null,
+      "expected_evidence_urls": [
+        "https://beta.example/"
+      ],
+      "expected_parent_category_id": null,
+      "expected_subcategory_name": "Sample Widgets",
+      "fingerprint": "b765d92fd564e0cd28d305d4b04f4dcd30a638bf3332330b2985c8f2e55966d5",
+      "merchant": "example beta widgets",
+      "packet_query_version": "merchant-research-v2",
+      "packet_schema_version": "transaction-web-research-v1",
+      "research_packet_sha256": "658e94af280fc4a04ed0e7c02710b95a94ecdea7187fcf688cd8de886b6533d9",
+      "statement_category": null
+    },
+    {
+      "amount_minor_units": 3200,
+      "database": "finance",
+      "expected_action": "suggest_new",
+      "expected_category_name": "Sample Food",
+      "expected_choice_id": null,
+      "expected_evidence_urls": [
+        "https://gamma.example/"
+      ],
+      "expected_parent_category_id": 11,
+      "expected_subcategory_name": "Sample Snacks",
+      "fingerprint": "8923734fa27fd98b78bf8e8f3f4197f206470342a185a0f3cc37080c3dc88cde",
+      "merchant": "example gamma snacks",
+      "packet_query_version": "merchant-research-v2",
+      "packet_schema_version": "transaction-web-research-v1",
+      "research_packet_sha256": "a82fb78fc79f6dd6e98d478fac041619b6b6a3f595237d48484f96888fefe198",
+      "statement_category": null
+    },
+    {
+      "amount_minor_units": 500,
+      "database": "finance",
+      "expected_action": "abstain",
+      "expected_category_name": null,
+      "expected_choice_id": null,
+      "expected_evidence_urls": null,
+      "expected_parent_category_id": null,
+      "expected_subcategory_name": null,
+      "fingerprint": "3a252eaf45ed1fec9d07c79520ec58054066230cf74d22d623cfe8ed6e56985a",
+      "merchant": "example ambiguous counter",
+      "packet_query_version": "merchant-research-v2",
+      "packet_schema_version": "transaction-web-research-v1",
+      "research_packet_sha256": "2d9dc242ce0af5f7c6fd159e9d7a25ff8ef0ce3a431d08e7671963edbc4bee2c",
+      "statement_category": null
+    }
+  ],
+  "packets": [
+    {
+      "normalized_merchant": "example alpha cafe",
+      "derived_query": "alpha cafe",
+      "status": "complete",
+      "searched_at": "2026-09-17T12:00:00+00:00",
+      "search_results": [
+        {
+          "position": 0,
+          "site_name": "Example",
+          "title": "Alpha Cafe",
+          "snippet": "Synthetic snippet.",
+          "url": "https://alpha.example/"
+        }
+      ],
+      "fetched_pages": [
+        {
+          "url": "https://alpha.example/",
+          "final_url": "https://alpha.example/",
+          "title": "Alpha Cafe",
+          "description": "Synthetic description.",
+          "text": "Synthetic bounded evidence text for the fixture.",
+          "relevance_matched_tokens": [
+            "alpha",
+            "cafe"
+          ]
+        }
+      ]
+    },
+    {
+      "normalized_merchant": "example beta widgets",
+      "derived_query": "beta widgets",
+      "status": "complete",
+      "searched_at": "2026-09-17T12:00:00+00:00",
+      "search_results": [
+        {
+          "position": 0,
+          "site_name": "Example",
+          "title": "Beta Widgets",
+          "snippet": "Synthetic snippet.",
+          "url": "https://beta.example/"
+        }
+      ],
+      "fetched_pages": [
+        {
+          "url": "https://beta.example/",
+          "final_url": "https://beta.example/",
+          "title": "Beta Widgets",
+          "description": "Synthetic description.",
+          "text": "Synthetic bounded evidence text for the fixture.",
+          "relevance_matched_tokens": [
+            "beta",
+            "widgets"
+          ]
+        }
+      ]
+    },
+    {
+      "normalized_merchant": "example gamma snacks",
+      "derived_query": "gamma snacks",
+      "status": "complete",
+      "searched_at": "2026-09-17T12:00:00+00:00",
+      "search_results": [
+        {
+          "position": 0,
+          "site_name": "Example",
+          "title": "Gamma Snacks",
+          "snippet": "Synthetic snippet.",
+          "url": "https://gamma.example/"
+        }
+      ],
+      "fetched_pages": [
+        {
+          "url": "https://gamma.example/",
+          "final_url": "https://gamma.example/",
+          "title": "Gamma Snacks",
+          "description": "Synthetic description.",
+          "text": "Synthetic bounded evidence text for the fixture.",
+          "relevance_matched_tokens": [
+            "gamma",
+            "snacks"
+          ]
+        }
+      ]
+    },
+    {
+      "normalized_merchant": "example ambiguous counter",
+      "derived_query": "ambiguous counter",
+      "status": "complete",
+      "searched_at": "2026-09-17T12:00:00+00:00",
+      "search_results": [
+        {
+          "position": 0,
+          "site_name": "Example",
+          "title": "Ambiguous Counter",
+          "snippet": "Synthetic snippet.",
+          "url": "https://counter.example/"
+        }
+      ],
+      "fetched_pages": [
+        {
+          "url": "https://counter.example/",
+          "final_url": "https://counter.example/",
+          "title": "Ambiguous Counter",
+          "description": "Synthetic description.",
+          "text": "Synthetic bounded evidence text for the fixture.",
+          "relevance_matched_tokens": [
+            "ambiguous",
+            "counter"
+          ]
+        }
+      ]
+    }
+  ],
+  "taxonomies": {
+    "finance": [
+      {
+        "category_id": 11,
+        "category_name": "Sample Food",
+        "subcategory_id": 101,
+        "subcategory_name": "Sample Eating Out"
+      },
+      {
+        "category_id": 11,
+        "category_name": "Sample Food",
+        "subcategory_id": 102,
+        "subcategory_name": "Sample Grocery"
+      },
+      {
+        "category_id": 12,
+        "category_name": "Sample Software",
+        "subcategory_id": 103,
+        "subcategory_name": "Sample Tooling"
+      }
+    ]
+  }
+}
