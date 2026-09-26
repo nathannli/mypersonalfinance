@@ -1,4 +1,4 @@
-.env
+.env*
 .venv
 classes/__pycache__
 bin/donotcommit/
