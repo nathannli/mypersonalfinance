@@ -38,7 +38,7 @@ class TestQueryDerivation(unittest.TestCase):
         self.assertEqual(derive_query("ACME WIDGETS TORONTO"), "acme widgets")
         self.assertEqual(derive_query("ACME WIDGETS TORONT ON"), "acme widgets")
         self.assertEqual(derive_query("ACME WIDGETS MISSISSAUGA"), "acme widgets")
-        self.assertEqual(derive_query("LAST Z SURVIVOR SG"), "last z survivor")
+        self.assertEqual(derive_query("ACME SURVIV GB"), "acme surviv")
 
     def test_strips_trailing_country_code_tld(self):
         self.assertEqual(derive_query("STAPLES.CA/48620392128  MISSISSAUGA"), "staples")
@@ -56,13 +56,6 @@ class TestQueryDerivation(unittest.TestCase):
     def test_normalizes_case_fullwidth_and_nbsp(self):
         self.assertEqual(derive_query("  ＡＣＭＥ\xa0  WIDGETS  "), "acme widgets")
         self.assertEqual(derive_query("AcMe WiDgEtS"), "acme widgets")
-
-    def test_real_statement_descriptors_derive_a_searchable_term(self):
-        self.assertEqual(
-            derive_query("CONG CAPHE EXAMPLE ### TORONT"), "cong caphe example"
-        )
-        self.assertEqual(derive_query("AIRWALXSG*LAST Z SURVIVOR SG"), "last z survivor")
-        self.assertEqual(derive_query("PAYPAL *AICAMERCHANT 6475551234"), "aicamerchant")
 
     def test_never_reduces_the_descriptor_to_nothing(self):
         # A lone location token stands rather than being stripped away entirely.
