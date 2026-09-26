@@ -287,8 +287,10 @@ def wait_for_amex_sms_code(requested_at: datetime) -> str:
 def submit_sms_mfa_browserbase(requested_at: datetime) -> None:
     logger.info("Waiting for Amex MFA code entry...")
     wait_until(
-        lambda: "Please enter the verification code"
-        in browse_eval("document.body.innerText"),
+        lambda: (
+            "Please enter the verification code"
+            in browse_eval("document.body.innerText")
+        ),
         "Amex MFA code entry",
     )
     browse_fill(
@@ -719,10 +721,12 @@ def select_csv_and_get_download_point() -> tuple[int, int]:
             "Download control",
         )
     wait_until(
-        lambda: execute_chrome_js(
-            "String(Boolean(document.querySelector('input[type=radio][value=csv]')))"
-        )
-        == "true",
+        lambda: (
+            execute_chrome_js(
+                "String(Boolean(document.querySelector('input[type=radio][value=csv]')))"
+            )
+            == "true"
+        ),
         "Amex export dialog",
     )
     coordinates = execute_chrome_js(

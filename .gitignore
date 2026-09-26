@@ -24,3 +24,11 @@ trace.zip
 
 .transaction-llm-gold.json
 .transaction-llm-approval.json
+
+.transaction-web-research/
+.transaction-web-research-approvals.json
+.transaction-web-research.lock
+.transaction-category-suggestions.json
+
+# Real bank statement descriptors. Private checkout only.
+tests/test_private_*.py

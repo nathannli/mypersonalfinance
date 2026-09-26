@@ -45,7 +45,7 @@ class TransactionProcessor:
 
     def _insert_transactions(
         self, df: pl.DataFrame, card_type: str
-    ) -> tuple[dict[TransactionStatus, int], list[dict]]:
+    ) -> tuple[dict[TransactionStatus, int], list[dict], list[str]]:
         """
         Insert transactions from DataFrame into database.
 
@@ -54,11 +54,12 @@ class TransactionProcessor:
             card_type: Type of credit card
 
         Returns:
-            Tuple of (typed outcome totals, unresolved row details). Every
-            processed row contributes exactly one typed outcome.
+            Tuple of (typed outcome totals, unresolved row details, suggestion
+            ids). Every processed row contributes exactly one typed outcome.
         """
         totals = {status: 0 for status in TransactionStatus}
         unresolved_rows: list[dict] = []
+        suggestion_ids: list[str] = []
 
         for row in df.iter_rows(named=True):
             date = row["date"]
@@ -82,6 +83,8 @@ class TransactionProcessor:
                 categorizer=self.categorizer,
             )
             totals[outcome.status] += 1
+            if outcome.status == TransactionStatus.SUGGESTED and outcome.suggestion_id:
+                suggestion_ids.append(outcome.suggestion_id)
             if outcome.status == TransactionStatus.UNRESOLVED:
                 unresolved_rows.append(
                     {
@@ -91,11 +94,11 @@ class TransactionProcessor:
                     }
                 )
 
-        return totals, unresolved_rows
+        return totals, unresolved_rows, suggestion_ids
 
     def _process_single_file(
         self, card_type: str, file_path: str | None, file_name: str
-    ) -> tuple[dict[TransactionStatus, int], int, list[dict]]:
+    ) -> tuple[dict[TransactionStatus, int], int, list[dict], list[str]]:
         """
         Process a single transaction file.
 
@@ -105,7 +108,8 @@ class TransactionProcessor:
             file_name: Display name for the file
 
         Returns:
-            Tuple of (typed outcome totals, total_rows, unresolved rows)
+            Tuple of (typed outcome totals, total_rows, unresolved rows,
+            suggestion ids)
 
         Raises:
             Exception: If file processing fails
@@ -121,11 +125,13 @@ class TransactionProcessor:
 
         # Insert transactions if DataFrame has data
         if df.height > 0:
-            totals, unresolved_rows = self._insert_transactions(df, card_type)
-            return (totals, df.height, unresolved_rows)
+            totals, unresolved_rows, suggestion_ids = self._insert_transactions(
+                df, card_type
+            )
+            return (totals, df.height, unresolved_rows, suggestion_ids)
         else:
             print("No data to process in the file")
-            return ({status: 0 for status in TransactionStatus}, 0, [])
+            return ({status: 0 for status in TransactionStatus}, 0, [], [])
 
     def process_files(
         self, card_type: str, files: Sequence[str | None]
@@ -160,10 +166,12 @@ class TransactionProcessor:
 
             # Process the file
             try:
-                totals, total, unresolved_rows = self._process_single_file(
-                    card_type, file_path, file_name
+                totals, total, unresolved_rows, suggestion_ids = (
+                    self._process_single_file(card_type, file_path, file_name)
                 )
-                results.add_success(file_name, totals, total, unresolved_rows)
+                results.add_success(
+                    file_name, totals, total, unresolved_rows, suggestion_ids
+                )
 
             except KeyboardInterrupt:
                 print("Keyboard interrupt")

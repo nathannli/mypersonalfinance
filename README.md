@@ -146,24 +146,90 @@ wins; a matched transaction makes no provider request.
 ```sh
 OPENCODEX_BASE_URL=http://localhost:10100
 OPENCODEX_API_KEY=<key>
-TRANSACTION_LLM_MODEL=anthropic/claude-haiku-4-5
+TRANSACTION_LLM_MODEL=SingularityApiDev/deepseek-v4-flash-0731
+ENRICHED_TRANSACTION_LLM_MODEL=anthropic/claude-haiku-4-5
 TRANSACTION_LLM_TIMEOUT_SECONDS=120
 TRANSACTION_LLM_MODE=shadow
 ```
 
-Only the configured base URL and the exact configured model are ever called;
-there is no provider or model fallback. A missing or empty `OPENCODEX_API_KEY`
-becomes a `provider_error` on the first LLM call, so deterministic-only runs do
-not need a key.
+`TRANSACTION_LLM_MODEL` governs `parents_finance` and unenriched validation.
+`ENRICHED_TRANSACTION_LLM_MODEL` governs enriched `finance` only; it defaults to
+`anthropic/claude-haiku-4-5` and never changes the parents path. Only the
+configured base URL and the exact configured model are ever called; there is no
+provider or model fallback. A missing or empty `OPENCODEX_API_KEY` becomes a
+`provider_error` on the first LLM call, so deterministic-only runs do not need a
+key.
+
+`OPENCODEX_BASE_URL` is part of the enriched write approval identity (V30), and
+only trailing slashes and surrounding whitespace are normalized. Host spelling
+and port are significant, so `http://127.0.0.1:10102` and
+`http://localhost:10102` are different identities and only the exact approved
+string verifies. The macmini reaches opencodex on the unauthenticated loopback
+listener at `http://127.0.0.1:10102`; external ssh hosts use the token-gated LAN
+listener on `10100`. Changing this value invalidates the existing enriched
+approval and requires a fresh three-pass gate.
+
+### Research-first workflow
+
+Enriched `finance` categorization answers unknown merchants from frozen,
+human-approved research packets. The load path never calls the web.
+
+1. Research: `research-transaction-merchants.py --database finance` discovers
+   current deterministic unknowns, queries TinyFish once per merchant, and
+   writes a pending packet per merchant. Add `--refresh` to re-research a
+   merchant whose evidence changed.
+2. Review: `review-transaction-research.py` lists pending packets and records
+   `--approve <packet_id>` or `--reject <packet_id> --reason <text>` offline.
+   Approval binds the exact `packet_sha256`; a successful refresh returns the
+   packet to pending.
+3. Load: `load-transactions.py --type amex --database finance` consumes only
+   approved packets. A `suggest_new` result is recorded for review, never
+   inserted.
+4. Review suggestions: inspect the private suggestion artifact and decide
+   whether to add the proposed category or subcategory yourself.
+
+Run the research and review steps on a schedule you control. A new or changed
+packet reaches the load path only after a human approves its exact hash.
+
+### TinyFish research limits and privacy
+
+`research-transaction-merchants.py` is the only entry point that reads
+`TINYFISH_API_KEY`; it loads the repository `.env` at startup. Transaction load,
+Excel load, cron, and gold validation never read that key and make zero TinyFish
+requests, so they run unchanged without it.
+
+- Search timeout 30 seconds; each fetched URL gets its own 150-second budget.
+- Requests are paced to stay within 30 requests per minute, and a request is
+  retried at most 3 times behind `Retry-After` or bounded backoff.
+- A packet is immutable until an explicit `--refresh` succeeds; a failed
+  refresh changes nothing. There is no TTL or background refresh.
+- TinyFish receives only the derived merchant search term, the fixed research
+  purpose, `CA`, and `en`. Amounts, dates, card and account data, the taxonomy,
+  and other transactions never leave.
+- Packets, evidence, approvals, and suggestions live in git-ignored private
+  files under the repository root: `.transaction-web-research/`,
+  `.transaction-web-research-approvals.json`, and
+  `.transaction-category-suggestions.json`. Search and fetch content, real
+  packets, suggestions, amounts, and keys never enter git, cron output, or
+  persistent logs.
+
+### Category suggestions
+
+`suggest_new` is recommendation-only. It records a cited proposal for a
+category the live taxonomy does not contain and makes the run `partial`; it
+never creates a category or subcategory row, writes an auto-match entry, or
+inserts the expense. Applying a suggestion is a manual decision.
 
 ### Cloud and proxy trust
 
-`anthropic/claude-haiku-4-5` is a cloud model. Merchant names,
-amounts, and the live category list for the selected database leave the local
-network when an unknown transaction is categorized. The configured OpenCodex
-proxy is the trusted routing boundary: approval binds the normalized proxy URL
-and the exact requested model ID, but it cannot attest which upstream route the
-proxy chooses. Point `OPENCODEX_BASE_URL` at a proxy you control.
+`anthropic/claude-haiku-4-5` and `SingularityApiDev/deepseek-v4-flash-0731` are
+cloud models. Merchant names, amounts, and the live category list for the
+selected database leave the local network when an unknown transaction is
+categorized, and the derived merchant term leaves it during research. The
+configured OpenCodex proxy is the trusted routing boundary: approval binds the
+normalized proxy URL and the exact requested model ID, but it cannot attest
+which upstream route the proxy chooses. Point `OPENCODEX_BASE_URL` at a proxy
+you control.
 
 ### Shadow mode and write mode
 
@@ -185,13 +251,17 @@ Approval is per database. A `finance` approval never authorizes
 ### Run status and exit codes
 
 Every processed row produces exactly one outcome: `inserted`, `duplicate`,
-`ignored`, `deleted`, `shadow`, or `unresolved`. Totals reconcile against the
-number of processed rows, and the summary prints each unresolved merchant, date,
-and reason.
+`ignored`, `deleted`, `shadow`, `suggested`, or `unresolved`. Totals reconcile
+against the number of processed rows, and the summary prints each unresolved
+merchant, date, and reason.
 
-- `complete`: no `shadow` and no `unresolved` rows; exit code 0.
-- `partial`: at least one `shadow` or `unresolved` row; exit code 0.
+- `complete`: no `shadow`, `suggested`, or `unresolved` rows; exit code 0.
+- `partial`: at least one `shadow`, `suggested`, or `unresolved` row; exit code 0.
 - `failed`: a file failed or write approval aborted; exit code 1.
+
+Restricted cron output reports status counts and suggestion IDs only; normalized
+merchant names, rationale, citations, and packet bodies stay out of
+Discord/persistent logs.
 
 The Excel cron run reports the same status and every outcome count through its
 Discord notification.
@@ -217,18 +287,32 @@ passing validation runs:
 
 - `.transaction-llm-gold.json` — private, git-ignored, real transaction
   contexts with user-approved expected results.
-- `.transaction-llm-approval.json` — private, git-ignored, per-database
-  approval record holding only identity hashes, pass count, and timestamp.
-- `tests/fixtures/transaction_llm_gold_synthetic.json` — tracked, synthetic
-  data only, used by the automated tests.
+- `.transaction-llm-approval.json` — private, git-ignored approval record with
+  separate per-database entries and a separate `finance:enriched` entry holding
+  only identity hashes, pass count, and timestamp.
+- `tests/fixtures/transaction_llm_gold_synthetic.json` and
+  `tests/fixtures/transaction_llm_gold_enriched_synthetic.json` — tracked,
+  synthetic data only, used by the automated tests.
 
-Both private files resolve from the repository root, never the process working
+Validate the protocol you are approving:
+
+```sh
+uv run python validate-transaction-llm-gold.py --database finance --enriched
+uv run python validate-transaction-llm-gold.py --database parents_finance
+```
+
+All private files resolve from the repository root, never the process working
 directory, so cron and direct runs agree. Each validation pass builds a fresh
 categorizer with an empty cache and reset circuit, and each gold case must cost
 exactly one real provider request; a cache replay, an opened circuit, or any
-mismatch fails the pass. Approval is invalidated whenever the database, base
-URL, model, prompt bytes, response-schema bytes, live taxonomy, or gold subset
-changes.
+mismatch fails the pass. Validation makes no TinyFish requests.
+
+Enriched approval additionally binds each case's approved research packet hash
+plus that packet's schema and query versions, so a successful refresh, a
+tampered packet, or an unapproved packet can never satisfy it. Approval is
+invalidated whenever the database, base URL, model, prompt bytes,
+response-schema bytes, live taxonomy, gold subset, packet hash, or packet
+versions change. Unenriched and enriched approvals never authorize each other.
 
 The automated test suite makes no network requests; it drives fake
 categorizers only.
