@@ -156,11 +156,25 @@ def _bounded_text(value: object, field: str, limit: int) -> str:
     return normalized
 
 
+def is_http_url(value: object) -> bool:
+    """The one absolute http/https URL rule: the packet store, the research
+    client, and citation validation all decide with this (V27, V10).
+
+    They must agree. A packet that stores a URL the client would refuse, or a
+    citation resolved against a wider rule than the one that admitted it, is a
+    silent divergence between three copies of one predicate.
+    """
+
+    if not isinstance(value, str):
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
 def _require_http_url(value: object, field: str) -> str:
     if not isinstance(value, str):
         raise ResearchPacketError(f"{field} must be a string")
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if not is_http_url(value):
         raise ResearchPacketError(f"{field} must be an absolute http/https URL")
     return value
 

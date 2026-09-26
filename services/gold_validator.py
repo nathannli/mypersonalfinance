@@ -195,7 +195,6 @@ def run_validation(
     cases: Sequence[GoldCase],
     choices: Iterable[Mapping[str, object]],
     categorizer_factory: CategorizerFactory,
-    required_passes: int = REQUIRED_PASSES,
 ) -> ValidationResult:
     """Run consecutive fresh passes, stopping at the first failing pass."""
     if not cases:
@@ -203,7 +202,7 @@ def run_validation(
 
     choice_rows = list(choices)
     validation = ValidationResult()
-    for _ in range(required_passes):
+    for _ in range(REQUIRED_PASSES):
         single = run_pass(cases, choice_rows, categorizer_factory)
         validation.passes.append(single)
         if not single.passed:
@@ -282,7 +281,6 @@ def run_enriched_validation(
     categorizer_factory: CategorizerFactory,
     *,
     packet_resolver: Callable[[str], object],
-    required_passes: int = REQUIRED_PASSES,
 ) -> EnrichedValidationResult:
     """Run consecutive fresh enriched passes, stopping at the first failure."""
     if not cases:
@@ -290,7 +288,7 @@ def run_enriched_validation(
 
     choice_rows = list(choices)
     validation = EnrichedValidationResult()
-    for _ in range(required_passes):
+    for _ in range(REQUIRED_PASSES):
         single = run_enriched_pass(
             cases, choice_rows, categorizer_factory, packet_resolver=packet_resolver
         )

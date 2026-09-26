@@ -24,6 +24,7 @@ from services.research_packets import (
     MAX_SEARCH_RESULTS,
     FetchedPage,
     SearchResult,
+    is_http_url,
 )
 from services.transaction_categorization import UnresolvedReason
 
@@ -171,15 +172,8 @@ class HttpResponse(NamedTuple):
 Transport = Callable[[str, str, Mapping[str, str], bytes | None, float], HttpResponse]
 
 
-def _is_http_url(value: object) -> bool:
-    if not isinstance(value, str):
-        return False
-    parsed = urllib.parse.urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
 def _require_client_url(value: object, field: str) -> str:
-    if not _is_http_url(value):
+    if not is_http_url(value):
         raise ResearchMalformedError(f"{field} must be an absolute http/https URL")
     return str(value)
 
@@ -473,7 +467,7 @@ def _parse_search_response(body: bytes) -> tuple[SearchResult, ...]:
         if not isinstance(item, dict):
             raise ResearchMalformedError("search result must be an object")
         url = item.get("url")
-        if not _is_http_url(url):
+        if not is_http_url(url):
             # V10: only valid http/https URLs are retained; rank order is kept.
             continue
         if url in seen:
@@ -549,7 +543,7 @@ def _page_from_fetch_result(
         raise ResearchEmptyEvidenceError("fetched page yielded no bounded evidence")
 
     final_url = item.get("final_url")
-    if not _is_http_url(final_url):
+    if not is_http_url(final_url):
         final_url = requested_url
 
     return FetchedPage(

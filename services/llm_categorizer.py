@@ -4,7 +4,6 @@ import json
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
-from urllib.parse import urlparse
 
 import requests
 
@@ -15,6 +14,7 @@ from services.research_packets import (
     MIN_EVIDENCE_URLS,
     PacketStatus,
     ResearchPacket,
+    is_http_url,
 )
 from services.transaction_categorization import (
     CanonicalContext,
@@ -591,8 +591,7 @@ def _validated_citations(value: object, packet: ResearchPacket) -> tuple[str, ..
             raise ResponseValidationError(
                 UnresolvedReason.MALFORMED, "evidence_urls entries must be strings"
             )
-        parsed = urlparse(entry)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        if not is_http_url(entry):
             raise ResponseValidationError(
                 UnresolvedReason.MALFORMED,
                 "evidence_urls entries must be absolute http/https URLs",

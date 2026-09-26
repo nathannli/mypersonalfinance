@@ -13,6 +13,7 @@ Usage:
     python review-transaction-research.py
     python review-transaction-research.py --approve <packet_id>
     python review-transaction-research.py --reject <packet_id> --reason "wrong company"
+    python review-transaction-research.py --suggestions
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from services.research_packets import (
     ResearchPacketError,
     list_packet_ids,
     load_packet,
+    load_suggestions,
     review_record_for,
     record_review,
     utc_now,
@@ -52,6 +54,9 @@ Usage Examples:
   List packets awaiting review:
     python review-transaction-research.py
 
+  List recorded category suggestions:
+    python review-transaction-research.py --suggestions
+
   Approve one exact packet:
     python review-transaction-research.py --approve <packet_id>
 
@@ -66,6 +71,11 @@ Usage Examples:
     parser.add_argument(
         "--reason",
         help="Why this packet is rejected (required with --reject)",
+    )
+    parser.add_argument(
+        "--suggestions",
+        action="store_true",
+        help="List the recorded review-only category suggestions",
     )
     return parser
 
@@ -200,6 +210,50 @@ def list_packets() -> int:
     return 0
 
 
+def list_suggestions() -> int:
+    """Render the grouped suggestion artifact, the review half of `suggest_new`.
+
+    `suggest_new` is the one action that persists something, so the artifact it
+    writes is the only place a proposal can be read back. This is local
+    interactive output, so the full proposal and its citations are shown; a
+    cron or persistent log reports identifiers only (V35).
+    """
+
+    try:
+        grouped = load_suggestions()
+    except ResearchPacketError as error:
+        print(f"ERROR: {error}")
+        return 1
+
+    total = sum(len(items) for items in grouped.values())
+    print(f"{RECORD_SEPARATOR}")
+    print(f"Category suggestions: {total} across {len(grouped)} merchant(s)")
+    print(RECORD_SEPARATOR)
+    if not grouped:
+        print("\nNo category suggestions recorded.")
+        return 0
+
+    for merchant, suggestions in sorted(grouped.items()):
+        print(f"\n{merchant} ({len(suggestions)}):")
+        for suggestion in suggestions:
+            print(f"  - {suggestion.suggestion_id}")
+            print(f"      category   : {suggestion.category_name}")
+            print(f"      subcategory: {suggestion.subcategory_name}")
+            if suggestion.parent_category_id is not None:
+                print(f"      parent id  : {suggestion.parent_category_id}")
+            if suggestion.rationale:
+                print(f"      rationale  : {excerpt(suggestion.rationale)}")
+            for url in suggestion.evidence_urls:
+                print(f"      evidence   : {url}")
+            print(f"      packet     : {suggestion.research_packet_sha256}")
+            print(f"      contexts   : {len(suggestion.context_fingerprints)}")
+    print(
+        "\nSuggestions are review-only. Nothing here created or changed a "
+        "category, subcategory, expense, or auto-match row."
+    )
+    return 0
+
+
 def load_for_review(packet_id: str) -> ResearchPacket:
     """Load a packet that is actually eligible for a decision."""
 
@@ -252,6 +306,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.reason and not args.reject:
         print("ERROR: --reason is only valid with --reject")
         return 1
+    if args.suggestions and (args.approve or args.reject or args.reason):
+        print("ERROR: --suggestions cannot be combined with a decision")
+        return 1
+    if args.suggestions:
+        return list_suggestions()
 
     if args.approve:
         return decide(args.approve, PacketReviewStatus.APPROVED, None)
