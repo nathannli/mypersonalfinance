@@ -159,11 +159,10 @@ class ResearchCliTestCase(CliTestCase):
         self.patch(
             research_cli,
             "run_targets",
-            lambda targets,
-            *,
-            client,
-            refresh=False: research_runner_module.run_targets(
-                targets, client=client, refresh=refresh, root=self.root
+            lambda targets, *, client, refresh=False: (
+                research_runner_module.run_targets(
+                    targets, client=client, refresh=refresh, root=self.root
+                )
             ),
         )
 
