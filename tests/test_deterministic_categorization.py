@@ -262,12 +262,12 @@ PARENTS_SEED_ROW_RE = re.compile(
 # `test_the_known_bad_pair_is_the_only_one`.
 KNOWN_BAD_SUBSTRING_ROW_ID = 78
 
-# Same silent-failure shape, found while writing the check above, and outside
-# the spec's V9, which covers only the two `finance` tables. Five
-# `parents_finance.auto_match` rows name `Grocery` or `Interest`, and neither
-# is a live `parents_finance` category, so those rules can never resolve.
-# Pinned explicitly so the set cannot grow unnoticed; needs its own task.
-KNOWN_DEAD_PARENT_CATEGORIES = {
+# T24 repaired this set, so it is now empty and the check below asserts it
+# stays empty. It was once five rows naming `Grocery` or `Interest`, neither a
+# live `parents_finance` category, plus a `PROMO INTEREST` duplicate that made
+# `get_auto_match_category` raise. Recorded here so the regression is
+# recognisable rather than merely forbidden.
+T24_REPAIRED_PARENT_CATEGORIES = {
     "Grocery": (1,),
     "Interest": (51, 147, 149, 150),
 }
@@ -410,13 +410,12 @@ class TestAutoMatchRowsNameLivePairs(unittest.TestCase):
         by_id = parents_choices()
         self.assertEqual(len(by_id), 22, "expected 22 live parents categories")
         live = set(by_id.values())
-
         rows = PARENTS_SEED_ROW_RE.findall(
             (self.seed / "parents_finance.auto_match.sql").read_text(encoding="utf-8")
         )
-        self.assertEqual(len(rows), 204, "expected 204 live parents auto_match rows")
+        self.assertEqual(len(rows), 203, "expected 203 live parents auto_match rows")
         self.assertEqual(
-            KNOWN_DEAD_PARENT_CATEGORIES,
+            {},
             {
                 category: tuple(
                     int(row_id)
@@ -425,8 +424,21 @@ class TestAutoMatchRowsNameLivePairs(unittest.TestCase):
                 )
                 for category in sorted({_unquote(name) for _, _, name in rows} - live)
             },
-            "the set of parents rules naming a non-live category changed; every "
-            "one of those rules can never resolve",
+            "a parents rule is naming a non-live category again; T24 removed "
+            f"exactly these, so a reappearance is a regression: {T24_REPAIRED_PARENT_CATEGORIES}",
+        )
+
+        # The duplicate T24 removed. Two exact rows for one merchant is what
+        # made get_auto_match_category raise, and the 2-column UNIQUE permits
+        # it, so nothing else would have caught it.
+        seen: dict[str, list[int]] = {}
+        for row_id, merchant, _ in rows:
+            seen.setdefault(_unquote(merchant), []).append(int(row_id))
+        self.assertEqual(
+            {},
+            {m: ids for m, ids in seen.items() if len(ids) > 1},
+            "a merchant has two exact auto_match rows again; that raises at "
+            "runtime and the 2-column UNIQUE does not prevent it",
         )
 
         substring_rows = PARENTS_SEED_ROW_RE.findall(

@@ -393,7 +393,37 @@ def parents() -> None:
         )
 
     am = scalar(db, "select count(*) from auto_match")
-    check(am == 204, "P9a parents.auto_match = 204", f"got {am}")
+    check(
+        am == 203,
+        "P9a parents.auto_match = 203 (was 204; T24 deleted id 150)",
+        f"got {am}",
+    )
+
+    # T24: the table must name only live categories, and must hold no merchant
+    # twice, or get_auto_match_category raises. The 2-column UNIQUE permits the
+    # duplicate, so nothing but this check would have caught it.
+    pcats = {r[0] for r in q(db, "select name from categories")}
+    dead_cats = q(
+        db,
+        "select id, merchant_name, merchant_category from auto_match "
+        "where merchant_category <> all(%s) order by id",
+        (list(pcats),),
+    )
+    check(
+        not dead_cats,
+        "P9d parents.auto_match names only live categories",
+        f"got {dead_cats}",
+    )
+    dupes = q(
+        db,
+        "select merchant_name, count(*), array_agg(merchant_category order by id) "
+        "from auto_match group by 1 having count(*) > 1",
+    )
+    check(
+        not dupes,
+        "P9e parents.auto_match holds no merchant twice (each raises at runtime)",
+        f"got {dupes}",
+    )
     check(
         "(merchant_name, merchant_category)" in uniques(db, "auto_match"),
         "P9b parents.auto_match UNIQUE is 2-column (correct here)",
