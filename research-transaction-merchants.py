@@ -28,7 +28,14 @@ from dotenv import load_dotenv
 
 from cli.transaction_loader_cli import TransactionLoaderCLI
 from db.my_finance import MyFinanceDB
-from services.research_packets import ResearchRunStatus, review_record_for
+from services.research_packets import (
+    PacketReviewStatus,
+    PacketStatus,
+    ResearchPacketError,
+    ResearchRunStatus,
+    load_packet,
+    review_record_for,
+)
 from services.research_runner import (
     ResearchRunSummary,
     discover_targets,
@@ -115,18 +122,35 @@ def load_rows(card_type: str, files: Sequence[str | None]) -> list[Mapping]:
 
 
 def coverage_line(packet_ids: Sequence[str]) -> str:
-    approved = rejected = pending = 0
+    """Count this run's packets by review state.
+
+    A packet is pending only when it is reviewable *and* no record binds its
+    exact hash. A failure packet is never reviewable (V55), and a record that
+    no longer binds the current hash does not decide it (V52) — a superseded
+    approval must read as pending, not as approved.
+    """
+    approved = rejected = pending = failed = 0
     for packet_id in packet_ids:
+        try:
+            packet = load_packet(packet_id)
+        except ResearchPacketError:
+            # A packet that cannot be read cannot be reviewed either.
+            failed += 1
+            continue
+        if packet.status is PacketStatus.FAILED:
+            failed += 1
+            continue
         record = review_record_for(packet_id)
-        if record is None:
+        if record is None or record.packet_sha256 != packet.packet_sha256:
             pending += 1
-        elif record.status.value == "approved":
+        elif record.status is PacketReviewStatus.APPROVED:
             approved += 1
         else:
             rejected += 1
     return (
         f"packets this run: {len(packet_ids)} "
-        f"(pending review {pending}, approved {approved}, rejected {rejected})"
+        f"(pending review {pending}, approved {approved}, rejected {rejected}, "
+        f"failed {failed})"
     )
 
 
