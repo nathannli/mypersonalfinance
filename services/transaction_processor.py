@@ -42,9 +42,39 @@ class TransactionProcessor:
         self.database = database
         self.loader = loader
         self.categorizer = categorizer
+        # Rows this run inserted, mapped to the file that inserted them, so a
+        # later file repeating one can name its origin instead of looking like
+        # an ordinary pre-existing duplicate.
+        self._inserted_rows: dict[tuple, str] = {}
+        self._cross_file_duplicates: list[dict] = []
+
+    def _record_row(self, key: tuple, file_name: str | None) -> None:
+        """Remember which file inserted a row, when the file is known."""
+
+        if file_name is not None:
+            self._inserted_rows[key] = file_name
+
+    def _note_duplicate(self, key: tuple, file_name: str | None) -> None:
+        """Record a duplicate that repeats a row this same run inserted."""
+
+        origin = self._inserted_rows.get(key)
+        if origin is None or origin == file_name:
+            # Either already in the database before this run, or a genuine
+            # repeat inside one file. Neither is a cross-file collision.
+            return
+        date, merchant, cost = key
+        self._cross_file_duplicates.append(
+            {
+                "date": date,
+                "merchant": merchant,
+                "cost": cost,
+                "file": file_name,
+                "first_seen_in": origin,
+            }
+        )
 
     def _insert_transactions(
-        self, df: pl.DataFrame, card_type: str
+        self, df: pl.DataFrame, card_type: str, file_name: str | None = None
     ) -> tuple[dict[TransactionStatus, int], list[dict], list[str]]:
         """
         Insert transactions from DataFrame into database.
@@ -52,6 +82,8 @@ class TransactionProcessor:
         Args:
             df: DataFrame containing transactions
             card_type: Type of credit card
+            file_name: File the rows came from, used only to attribute
+                cross-file duplicates
 
         Returns:
             Tuple of (typed outcome totals, unresolved row details, suggestion
@@ -66,10 +98,12 @@ class TransactionProcessor:
             merchant = row["merchant"]
             cost = row["cost"]
             cc_category = row["cc_category"]
+            key = (date, merchant, cost)
 
             # Check if transaction already exists in expenses table
             if self.database.check_if_expense_exists(date, merchant, cost):
                 totals[TransactionStatus.DUPLICATE] += 1
+                self._note_duplicate(key, file_name)
                 continue
 
             print("\n\n")
@@ -83,6 +117,8 @@ class TransactionProcessor:
                 categorizer=self.categorizer,
             )
             totals[outcome.status] += 1
+            if outcome.status is not TransactionStatus.DUPLICATE:
+                self._record_row(key, file_name)
             if outcome.status == TransactionStatus.SUGGESTED and outcome.suggestion_id:
                 suggestion_ids.append(outcome.suggestion_id)
             if outcome.status == TransactionStatus.UNRESOLVED:
@@ -126,7 +162,7 @@ class TransactionProcessor:
         # Insert transactions if DataFrame has data
         if df.height > 0:
             totals, unresolved_rows, suggestion_ids = self._insert_transactions(
-                df, card_type
+                df, card_type, file_name
             )
             return (totals, df.height, unresolved_rows, suggestion_ids)
         else:
@@ -147,6 +183,9 @@ class TransactionProcessor:
             ProcessingResults object with processing summary
         """
         results = ProcessingResults()
+        # A processor can be reused, so per-run memory starts empty.
+        self._inserted_rows = {}
+        self._cross_file_duplicates = []
 
         # Process each file
         for idx, file_path in enumerate(files, 1):
@@ -183,4 +222,5 @@ class TransactionProcessor:
                 # Continue processing remaining files
                 continue
 
+        results.set_cross_file_duplicates(self._cross_file_duplicates)
         return results

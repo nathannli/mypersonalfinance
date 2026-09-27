@@ -9,8 +9,21 @@ Only an approval of an exact `packet_sha256` makes a packet eligible to support
 `select` or `suggest_new` (V45). Pending, rejected, stale, and failure packets
 never do.
 
+With no flags on a terminal it walks the pending packets one at a time and
+records a decision for each. On a non-interactive stdin it prints them all
+instead, so a script or a log gets the listing. ``--interactive`` and ``--list``
+force either behaviour.
+
+``--type`` with ``--filepath`` or ``--folder`` reads the same statement rows
+the research pass read and shows the transaction dates behind each merchant, so
+the evidence is judged against the purchase that prompted it. Those flags are
+optional and change no decision: they only add context to the printed packet.
+
 Usage:
     python review-transaction-research.py
+    python review-transaction-research.py --interactive
+    python review-transaction-research.py --type amex --folder ~/Downloads/amex/
+    python review-transaction-research.py --list
     python review-transaction-research.py --approve <packet_id>
     python review-transaction-research.py --reject <packet_id> --reason "wrong company"
     python review-transaction-research.py --suggestions
@@ -19,7 +32,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+import sys
+from collections.abc import Mapping, Sequence
+from datetime import date
 
 from services.research_packets import (
     PacketReviewRecord,
@@ -34,8 +49,12 @@ from services.research_packets import (
     record_review,
     utc_now,
 )
+from services.transaction_categorization import normalize_context_text
+from services.transaction_loader import TransactionLoader, statement_files
+from sources.registry import get_card_type_names, requires_file
 
 EXCERPT_CHARS = 400
+MAX_SHOWN_DATES = 10
 RECORD_SEPARATOR = "-" * 72
 
 
@@ -53,6 +72,13 @@ Usage Examples:
 
   List packets awaiting review:
     python review-transaction-research.py
+
+  Walk pending packets one at a time and record each decision:
+    python review-transaction-research.py --interactive
+
+  Show the transaction dates behind each merchant while reviewing:
+    python review-transaction-research.py --interactive \\
+        --type amex --folder ~/Downloads/amex/
 
   List recorded category suggestions:
     python review-transaction-research.py --suggestions
@@ -77,7 +103,74 @@ Usage Examples:
         action="store_true",
         help="List the recorded review-only category suggestions",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Walk pending packets one at a time and record each decision",
+    )
+    parser.add_argument(
+        "--list",
+        dest="list_only",
+        action="store_true",
+        help="Print every pending packet at once instead of walking them",
+    )
+    parser.add_argument(
+        "--type",
+        choices=get_card_type_names(),
+        help=(
+            "Card type whose statement rows hold the transaction dates to show. "
+            "Requires --filepath or --folder for a file-based card."
+        ),
+    )
+    parser.add_argument(
+        "--filepath", help="Statement file to read transaction dates from"
+    )
+    parser.add_argument(
+        "--folder", help="Folder of statement files to read transaction dates from"
+    )
     return parser
+
+
+def load_merchant_dates(args: argparse.Namespace) -> dict[str, tuple[date, ...]]:
+    """Group statement dates by normalized merchant, read offline.
+
+    Returns an empty mapping when no card type was named, so the review output
+    is unchanged for callers that pass no statement arguments.
+    """
+
+    if not args.type:
+        return {}
+    if args.filepath and args.folder:
+        raise ValueError("Cannot provide both --filepath and --folder.")
+    if requires_file(args.type):
+        if not args.filepath and not args.folder:
+            raise ValueError(
+                f"Please provide either --filepath or --folder for {args.type} "
+                "transactions"
+            )
+    elif args.filepath or args.folder:
+        raise ValueError(
+            f"{args.type} doesn't use csv files, no need to provide --filepath "
+            "or --folder"
+        )
+
+    if args.folder:
+        files = statement_files(args.folder)
+        print(f"Found {len(files)} files in folder: {args.folder}")
+    elif args.filepath:
+        files = [args.filepath]
+    else:
+        files = [None]
+
+    loader = TransactionLoader()
+    grouped: dict[str, set[date]] = {}
+    for file_path in files:
+        for row in loader.load(args.type, file_path).iter_rows(named=True):
+            merchant = row.get("merchant")
+            if not isinstance(merchant, str) or not merchant.strip():
+                continue
+            grouped.setdefault(normalize_context_text(merchant), set()).add(row["date"])
+    return {merchant: tuple(sorted(dates)) for merchant, dates in grouped.items()}
 
 
 def resolve_packet_id(value: str) -> str:
@@ -103,7 +196,22 @@ def excerpt(text: str) -> str:
     return f"{collapsed[:EXCERPT_CHARS]}..."
 
 
-def render_packet(packet: ResearchPacket, *, index: int | None = None) -> None:
+def format_dates(dates: Sequence[date]) -> str:
+    """Render a merchant's transaction dates, bounded."""
+
+    shown = ", ".join(value.isoformat() for value in dates[:MAX_SHOWN_DATES])
+    remaining = len(dates) - MAX_SHOWN_DATES
+    if remaining > 0:
+        return f"{shown} (+{remaining} more)"
+    return shown
+
+
+def render_packet(
+    packet: ResearchPacket,
+    *,
+    index: int | None = None,
+    merchant_dates: Mapping[str, tuple[date, ...]] | None = None,
+) -> None:
     """Render one packet's evidence, bounded and without any page dump."""
 
     record = review_record_for(packet.packet_id)
@@ -124,6 +232,10 @@ def render_packet(packet: ResearchPacket, *, index: int | None = None) -> None:
             f"    review       : {record.status.value} at {record.reviewed_at}"
             + (f" ({record.reason})" if record.reason else "")
         )
+    if merchant_dates is not None:
+        dates = merchant_dates.get(packet.normalized_merchant, ())
+        label = format_dates(dates) if dates else "none in the given statements"
+        print(f"    transactions : {label}")
 
     print(f"    search results ({len(packet.search_results)}):")
     for result in packet.search_results:
@@ -154,27 +266,29 @@ def is_pending(packet: ResearchPacket) -> bool:
     return record.packet_sha256 != packet.packet_sha256
 
 
-def list_packets() -> int:
-    packet_ids = list_packet_ids()
-    if not packet_ids:
-        print("No research packets found. Run research-transaction-merchants.py first.")
-        return 0
+def collect_packets() -> tuple[list[ResearchPacket], dict[str, int], list[str]]:
+    """Split every stored packet into pending, decided and unreviewable.
 
+    Returns the pending packets, the counts of every other state, and any
+    warnings for packets that could not be read, so a caller can present them
+    without a second pass over the store.
+    """
+
+    packet_ids = list_packet_ids()
     pending: list[ResearchPacket] = []
-    approved = rejected = failed = 0
-    broken = 0
+    counts = {"stored": len(packet_ids), "approved": 0, "rejected": 0, "failed": 0}
+    warnings: list[str] = []
 
     for packet_id in packet_ids:
         try:
             packet = load_packet(packet_id)
         except ResearchPacketError as error:
             # Surface a damaged packet instead of hiding it behind the listing.
-            print(f"WARNING: packet {packet_id} could not be read: {error}")
-            broken += 1
+            warnings.append(f"WARNING: packet {packet_id} could not be read: {error}")
             continue
         if packet.status is PacketStatus.FAILED:
             # V55: failure packets are never reviewable.
-            failed += 1
+            counts["failed"] += 1
             continue
         if is_pending(packet):
             # A record that no longer binds this exact hash is pending too, so
@@ -183,17 +297,34 @@ def list_packets() -> int:
             continue
         record = review_record_for(packet_id)
         if record is not None and record.status is PacketReviewStatus.APPROVED:
-            approved += 1
+            counts["approved"] += 1
         else:
-            rejected += 1
+            counts["rejected"] += 1
 
+    return pending, counts, warnings
+
+
+def print_summary(counts: dict[str, int], broken: int) -> None:
     print(f"{RECORD_SEPARATOR}")
     print(
-        f"Packets: {len(packet_ids)} stored, {len(pending)} pending review, "
-        f"{approved} approved, {rejected} rejected, {failed} failed"
-        + (f", {broken} unreadable" if broken else "")
+        f"Packets: {counts['stored']} stored, {counts['pending']} pending review, "
+        f"{counts['approved']} approved, {counts['rejected']} rejected, "
+        f"{counts['failed']} failed" + (f", {broken} unreadable" if broken else "")
     )
     print(RECORD_SEPARATOR)
+
+
+def list_packets(merchant_dates: Mapping[str, tuple[date, ...]] | None = None) -> int:
+    packet_ids = list_packet_ids()
+    if not packet_ids:
+        print("No research packets found. Run research-transaction-merchants.py first.")
+        return 0
+
+    pending, counts, warnings = collect_packets()
+    for warning in warnings:
+        print(warning)
+    counts["pending"] = len(pending)
+    print_summary(counts, broken=len(warnings))
 
     if not pending:
         print("\nNothing awaiting review.")
@@ -201,12 +332,92 @@ def list_packets() -> int:
 
     print(f"\n{len(pending)} packet(s) awaiting review:\n")
     for index, packet in enumerate(pending, start=1):
-        render_packet(packet, index=index)
+        render_packet(packet, index=index, merchant_dates=merchant_dates)
     print(
+        "Walk them one at a time with: "
+        "python review-transaction-research.py --interactive\n"
         "Approve with: python review-transaction-research.py --approve <packet_id>\n"
         "Reject with:  python review-transaction-research.py --reject <packet_id> "
         '--reason "..."'
     )
+    return 0
+
+
+def prompt(message: str) -> str:
+    """Read one line, tolerating a closed or non-interactive stdin."""
+
+    try:
+        return input(message).strip()
+    except EOFError:
+        return ""
+
+
+def review_interactively(
+    merchant_dates: Mapping[str, tuple[date, ...]] | None = None,
+) -> int:
+    """Walk the pending packets one at a time, recording a decision per packet.
+
+    Each packet is shown on its own so the evidence for one merchant is read
+    before the next is opened. The decision path is the same `decide` the
+    one-shot flags use, so an interactive run and a scripted one write the
+    same records.
+    """
+
+    packet_ids = list_packet_ids()
+    if not packet_ids:
+        print("No research packets found. Run research-transaction-merchants.py first.")
+        return 0
+
+    pending, counts, warnings = collect_packets()
+    for warning in warnings:
+        print(warning)
+    counts["pending"] = len(pending)
+    print_summary(counts, broken=len(warnings))
+
+    if not pending:
+        print("\nNothing awaiting review.")
+        return 0
+
+    print(
+        f"\nWalking {len(pending)} packet(s). One packet at a time; the next is\n"
+        "shown after you decide. Type the highlighted letter or the whole word.\n"
+    )
+
+    decided = 0
+    for index, packet in enumerate(pending, start=1):
+        print(RECORD_SEPARATOR)
+        render_packet(packet, index=index, merchant_dates=merchant_dates)
+
+        while True:
+            answer = prompt(
+                f"[{index}/{len(pending)}] (a)pprove / (r)eject / (s)kip / (q)uit? "
+            ).lower()
+            if answer in {"a", "approve"}:
+                code = decide(packet.packet_id, PacketReviewStatus.APPROVED, None)
+                decided += 1 if code == 0 else 0
+                break
+            if answer in {"r", "reject"}:
+                reason = prompt("reason (required): ")
+                if not reason:
+                    # An empty reason would write a rejection nobody can act on.
+                    print("A rejection needs a reason. Try again, or s to skip.")
+                    continue
+                code = decide(packet.packet_id, PacketReviewStatus.REJECTED, reason)
+                decided += 1 if code == 0 else 0
+                break
+            if answer in {"s", "skip"}:
+                print("Skipped; it stays pending.\n")
+                break
+            if answer in {"q", "quit"}:
+                remaining = len(pending) - index + 1
+                print(
+                    f"\nStopped. {decided} decision(s) recorded, "
+                    f"{remaining} packet(s) left pending."
+                )
+                return 0
+            print("Unrecognized. Use (a)pprove, (r)eject, (s)kip or (q)uit.\n")
+
+    print(f"\nDone. {decided} decision(s) recorded.")
     return 0
 
 
@@ -309,9 +520,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.suggestions and (args.approve or args.reject or args.reason):
         print("ERROR: --suggestions cannot be combined with a decision")
         return 1
+    if args.interactive and args.list_only:
+        print("ERROR: pass either --interactive or --list, not both")
+        return 1
+    if args.interactive and (args.approve or args.reject or args.reason):
+        print("ERROR: --interactive cannot be combined with a single-packet decision")
+        return 1
     if args.suggestions:
         return list_suggestions()
 
+    try:
+        merchant_dates = load_merchant_dates(args)
+    except (ValueError, OSError) as error:
+        print(f"ERROR: {error}")
+        return 1
+
+    if args.interactive:
+        return review_interactively(merchant_dates)
     if args.approve:
         return decide(args.approve, PacketReviewStatus.APPROVED, None)
     if args.reject:
@@ -319,7 +544,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("ERROR: --reject requires a --reason")
             return 1
         return decide(args.reject, PacketReviewStatus.REJECTED, args.reason.strip())
-    return list_packets()
+    if args.list_only or not sys.stdin.isatty():
+        # A piped or redirected stdin cannot answer, so it gets the listing.
+        return list_packets(merchant_dates)
+    return review_interactively(merchant_dates)
 
 
 if __name__ == "__main__":
