@@ -6,7 +6,6 @@ validation, and orchestration of the transaction loading process.
 """
 
 import argparse
-import os
 from collections.abc import Sequence
 from sys import exit
 
@@ -21,7 +20,7 @@ from db.parents_finance import ParentsFinanceDB
 from services.categorizer_factory import build_categorizer, write_authorizers_for
 from services.enriched_categorization import resolve_approved_packet
 from services.llm_categorizer import OpenCodexCategorizer
-from services.transaction_loader import TransactionLoader
+from services.transaction_loader import TransactionLoader, statement_files
 from services.transaction_llm_approval import ENRICHED_GOLD_DATABASE
 from services.transaction_processor import TransactionProcessor
 
@@ -149,21 +148,10 @@ Supported card types:
             # Online cards don't use files, process once with no file
             return [None]
         elif folder_path:
-            # Validate folder exists
-            if not os.path.isdir(folder_path):
-                raise ValueError(f"Folder does not exist: {folder_path}")
-
-            # Get all files in the folder, sorted so per-file results are
+            # Only real statement files, sorted so per-file results are
             # reproducible: an unsorted listing lets a rolling export claim a
             # row from a monthly statement that also contains it.
-            all_files = [
-                os.path.join(folder_path, f)
-                for f in sorted(os.listdir(folder_path))
-                if os.path.isfile(os.path.join(folder_path, f))
-            ]
-
-            if not all_files:
-                raise ValueError(f"Folder is empty: {folder_path}")
+            all_files = statement_files(folder_path)
 
             print(f"Found {len(all_files)} files in folder: {folder_path}")
             return all_files

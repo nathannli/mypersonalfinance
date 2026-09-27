@@ -32,7 +32,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import date
@@ -51,7 +50,7 @@ from services.research_packets import (
     utc_now,
 )
 from services.transaction_categorization import normalize_context_text
-from services.transaction_loader import TransactionLoader
+from services.transaction_loader import TransactionLoader, statement_files
 from sources.registry import get_card_type_names, requires_file
 
 EXCERPT_CHARS = 400
@@ -156,15 +155,7 @@ def load_merchant_dates(args: argparse.Namespace) -> dict[str, tuple[date, ...]]
         )
 
     if args.folder:
-        if not os.path.isdir(args.folder):
-            raise ValueError(f"Folder does not exist: {args.folder}")
-        files: Sequence[str | None] = [
-            os.path.join(args.folder, name)
-            for name in sorted(os.listdir(args.folder))
-            if os.path.isfile(os.path.join(args.folder, name))
-        ]
-        if not files:
-            raise ValueError(f"Folder is empty: {args.folder}")
+        files = statement_files(args.folder)
         print(f"Found {len(files)} files in folder: {args.folder}")
     elif args.filepath:
         files = [args.filepath]
