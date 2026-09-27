@@ -750,3 +750,192 @@ class TestReviewSuggestionsSurface(ReviewCliTestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("ERROR", output)
+
+
+class ResearchCoverageTestCase(CliTestCase):
+    """coverage_line reads the real store, bound to a temporary root."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from services import research_packets as packets
+
+        # Patch only what the entry point actually calls, so a regression
+        # fails on the counted value rather than on a missing attribute.
+        if hasattr(research_cli, "load_packet"):
+            self.patch(
+                research_cli,
+                "load_packet",
+                lambda pid: packets.load_packet(pid, root=self.root),
+            )
+        self.patch(
+            research_cli,
+            "review_record_for",
+            lambda pid: packets.review_record_for(pid, root=self.root),
+        )
+        self.packets = packets
+
+    def store_packet_for(self, merchant: str, **overrides) -> ResearchPacket:
+        values = {
+            "normalized_merchant": merchant,
+            "derived_query": merchant,
+            "status": PacketStatus.COMPLETE,
+            "searched_at": "2026-09-17T12:00:00+00:00",
+            "search_results": (
+                SearchResult(
+                    position=0,
+                    site_name="Acme",
+                    title=merchant,
+                    snippet="We make widgets",
+                    url=SEARCH_URL,
+                ),
+            ),
+            "fetched_pages": (
+                FetchedPage(
+                    url=SEARCH_URL,
+                    final_url=SEARCH_URL,
+                    title=merchant,
+                    description="A widget maker",
+                    text="Acme makes widgets for industry.",
+                    relevance_matched_tokens=("acme",),
+                ),
+            ),
+        }
+        values.update(overrides)
+        packet = ResearchPacket(**values)
+        store_packet(packet, root=self.root)
+        return packet
+
+    def store_failure_for(self, merchant: str) -> ResearchPacket:
+        from services.research_packets import store_failure_packet
+
+        packet = ResearchPacket(
+            normalized_merchant=merchant,
+            derived_query=merchant,
+            status=PacketStatus.FAILED,
+            searched_at="2026-09-17T12:00:00+00:00",
+            failure_reason=research_runner_module.UnresolvedReason.RESEARCH_IRRELEVANT,
+        )
+        store_failure_packet(packet, root=self.root)
+        return packet
+
+    def decide(self, packet: ResearchPacket, status, packet_sha256: str) -> None:
+        self.packets.record_review(
+            self.packets.PacketReviewRecord(
+                packet_id=packet.packet_id,
+                packet_sha256=packet_sha256,
+                status=status,
+                reviewed_at="2026-09-17T13:00:00+00:00",
+                reason="wrong company"
+                if status is PacketReviewStatus.REJECTED
+                else None,
+            ),
+            root=self.root,
+        )
+
+    def counts(self, line: str) -> dict[str, int]:
+        import re
+
+        inner = line.split("(", 1)[1].rstrip(")")
+        return {k: int(v) for k, v in re.findall(r"([a-z]+(?: [a-z]+)*) (\d+)", inner)}
+
+
+class TestResearchCoverageCounts(ResearchCoverageTestCase):
+    """A failure is never pending, and a stale record never decides (V52, V55)."""
+
+    def test_a_failed_packet_is_counted_failed_not_pending(self):
+        failure = self.store_failure_for("nowhere widgets")
+
+        line = research_cli.coverage_line([failure.packet_id])
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 0, "approved": 0, "rejected": 0, "failed": 1},
+        )
+
+    def test_a_superseded_record_reads_pending_not_approved(self):
+        packet = self.store_packet_for("acme widgets")
+        self.decide(packet, PacketReviewStatus.APPROVED, "0" * 64)
+
+        line = research_cli.coverage_line([packet.packet_id])
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 1, "approved": 0, "rejected": 0, "failed": 0},
+        )
+
+    def test_a_record_on_the_exact_hash_decides(self):
+        packet = self.store_packet_for("acme widgets")
+        self.decide(packet, PacketReviewStatus.APPROVED, packet.packet_sha256)
+
+        line = research_cli.coverage_line([packet.packet_id])
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 0, "approved": 1, "rejected": 0, "failed": 0},
+        )
+
+    def test_rejection_counts_as_rejected(self):
+        packet = self.store_packet_for("acme widgets")
+        self.decide(packet, PacketReviewStatus.REJECTED, packet.packet_sha256)
+
+        line = research_cli.coverage_line([packet.packet_id])
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 0, "approved": 0, "rejected": 1, "failed": 0},
+        )
+
+    def test_no_record_counts_as_pending(self):
+        packet = self.store_packet_for("acme widgets")
+
+        line = research_cli.coverage_line([packet.packet_id])
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 1, "approved": 0, "rejected": 0, "failed": 0},
+        )
+
+    def test_buckets_partition_every_state(self):
+        fresh = self.store_packet_for("fresh widgets")
+        approved = self.store_packet_for("approved widgets")
+        self.decide(approved, PacketReviewStatus.APPROVED, approved.packet_sha256)
+        rejected = self.store_packet_for("rejected widgets")
+        self.decide(rejected, PacketReviewStatus.REJECTED, rejected.packet_sha256)
+        failed = self.store_failure_for("failed widgets")
+        superseded = self.store_packet_for("superseded widgets")
+        self.decide(superseded, PacketReviewStatus.APPROVED, "0" * 64)
+
+        ids = [
+            fresh.packet_id,
+            approved.packet_id,
+            rejected.packet_id,
+            failed.packet_id,
+            superseded.packet_id,
+        ]
+        line = research_cli.coverage_line(ids)
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 2, "approved": 1, "rejected": 1, "failed": 1},
+        )
+        self.assertIn(f"packets this run: {len(ids)}", line)
+
+    def test_a_damaged_packet_is_counted_failed_and_does_not_raise(self):
+        packet = self.store_packet_for("acme widgets")
+        store = self.root / ".transaction-web-research"
+        (store / f"{packet.packet_id}.json").write_text("{ not json", encoding="utf-8")
+
+        line = research_cli.coverage_line([packet.packet_id])
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 0, "approved": 0, "rejected": 0, "failed": 1},
+        )
+
+    def test_an_empty_run_reports_zeroes(self):
+        line = research_cli.coverage_line([])
+
+        self.assertEqual(
+            self.counts(line),
+            {"pending review": 0, "approved": 0, "rejected": 0, "failed": 0},
+        )
