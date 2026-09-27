@@ -317,7 +317,16 @@ class MyFinanceDB(FinanceDB):
         if exact is not None:
             return exact
         # try substring auto match
-        query = "select substring, merchant_category, merchant_subcategory from substring_auto_match"
+        # ORDER BY id: find_substring_auto_match returns the FIRST rule that
+        # matches, and 74 live merchants match more than one rule, so
+        # without a deterministic order the winning row is whatever the
+        # planner hands back. Today 0 of those 74 disagree on the answer, so
+        # this changes no live result; it makes the result reproducible
+        # instead of arbitrary, and stable across vacuum and plan changes.
+        query = (
+            "select substring, merchant_category, merchant_subcategory "
+            "from substring_auto_match order by id"
+        )
         return find_substring_auto_match(merchant, self.select(query))
 
     def insert_into_auto_match(
