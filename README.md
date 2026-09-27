@@ -33,7 +33,7 @@ uv run ruff check
 uv run ruff format --check
 ```
 
-745 tests, all offline: no database, no network. CI runs the same two gates on
+753 tests, all offline: no database, no network. CI runs the same two gates on
 Python 3.13 — `pre-commit` and the full unit suite — so a red test fails the PR.
 
 Note the discovery form. `tests/` is not a package, so

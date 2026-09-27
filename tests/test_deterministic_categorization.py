@@ -7,9 +7,14 @@ preserving rather than a quiet rewrite.
 
 from __future__ import annotations
 
+import ast
+import random
+import re
 import unittest
 from pathlib import Path
 from unittest import mock
+
+from utils.repo_paths import repo_root
 
 from services import deterministic_categorization as dc
 from services.deterministic_categorization import (
@@ -137,6 +142,304 @@ class TestFindSubstringAutoMatch(unittest.TestCase):
         self.assertEqual(
             find_substring_auto_match("ACME", [("acme", "Food", "Grocery")]),
             ("Food", "Grocery"),
+        )
+
+
+class TestSubstringOrderInvariance(unittest.TestCase):
+    """V10: substring resolution does not depend on the order rules arrive in.
+
+    `find_substring_auto_match` returns the FIRST rule that matches, so the
+    answer is only stable when the rules it is given are in a stable order.
+    Two things follow, and both are asserted here: the resolver is genuinely
+    invariant when the matching rules agree, and the query feeding it is
+    pinned to `ORDER BY id` so the answer is the same on every run.
+    """
+
+    # Real rules with the same shape as live: several patterns match one
+    # merchant, and they all resolve to the same pair.
+    AGREEING = [
+        ("coffee", "Food", "Eating Out"),
+        ("cafe", "Food", "Eating Out"),
+        ("espresso", "Food", "Eating Out"),
+        ("unrelated", "Travel", "Travel"),
+    ]
+
+    def test_agreeing_rules_are_invariant_under_permutation(self):
+        for seed in range(25):
+            shuffled = list(self.AGREEING)
+            random.Random(seed).shuffle(shuffled)
+            with self.subTest(seed=seed):
+                self.assertEqual(
+                    find_substring_auto_match("corner coffee cafe", shuffled),
+                    ("Food", "Eating Out"),
+                )
+
+    def test_row_order_decides_when_rules_disagree(self):
+        # The resolver is first-wins, not consensus. This is the behaviour the
+        # ORDER BY exists to pin down, so it is asserted rather than left
+        # implicit: a disagreeing pair means the caller's ordering is the
+        # whole answer.
+        rows = [
+            ("corner", "Food", "Eating Out"),
+            ("corner", "Travel", "Travel"),
+        ]
+        self.assertEqual(
+            find_substring_auto_match("corner", rows), ("Food", "Eating Out")
+        )
+        self.assertEqual(
+            find_substring_auto_match("corner", list(reversed(rows))),
+            ("Travel", "Travel"),
+        )
+
+
+class TestSubstringQueryIsOrdered(unittest.TestCase):
+    """The caller pins the order the resolver depends on (T11).
+
+    Reads the query out of the AST rather than by regex, because the literal
+    is wrapped across two implicitly concatenated strings. The parser folds
+    those back into one constant, so this survives reformatting and line
+    wrapping instead of silently matching nothing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        source = (Path(repo_root()) / "db" / "my_finance.py").read_text(
+            encoding="utf-8"
+        )
+        cls.queries = [
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.lower().startswith("select")
+        ]
+
+    def _query_for(self, table: str) -> str:
+        found = [q for q in self.queries if f"from {table}" in q.lower()]
+        self.assertEqual(
+            len(found), 1, f"expected one query against {table}, found {found}"
+        )
+        return found[0]
+
+    def test_substring_query_orders_by_id(self):
+        # Without this the winning rule is whatever the planner returns.
+        # Measured on live: 74 merchants match more than one rule, and forcing
+        # enable_seqscan = off already changes the row order.
+        query = self._query_for("substring_auto_match")
+        self.assertIn(
+            "order by id",
+            query.lower(),
+            f"substring query is unordered: {query!r}",
+        )
+
+    def test_exact_query_is_unordered_but_raises_on_conflict(self):
+        # Deliberate asymmetry. find_exact_auto_match raises when one merchant
+        # has two rows, so its answer never depends on row order and an
+        # ORDER BY there would be a no-op dressed as a fix.
+        query = self._query_for("merchant_name_auto_match")
+        self.assertNotIn("order by", query.lower())
+
+
+CATEGORIES_INSERT_RE = re.compile(r"VALUES \((\d+), '((?:[^']|'')*)'\)", re.IGNORECASE)
+SUBCATEGORIES_INSERT_RE = re.compile(
+    r"VALUES \((\d+), '((?:[^']|'')*)', (\d+), (\d+)\)", re.IGNORECASE
+)
+SEED_ROW_RE = re.compile(
+    r"VALUES \((\d+), '((?:[^']|'')*)', '((?:[^']|'')*)', '((?:[^']|'')*)'\)",
+    re.IGNORECASE,
+)
+PARENTS_CATEGORIES_INSERT_RE = re.compile(
+    r"VALUES \((\d+), '((?:[^']|'')*)', (\d+)\)", re.IGNORECASE
+)
+PARENTS_SEED_ROW_RE = re.compile(
+    r"VALUES \((\d+), '((?:[^']|'')*)', '((?:[^']|'')*)'\)", re.IGNORECASE
+)
+
+# `finance.substring_auto_match` id 78 names ('Shopping', 'Hygiene'), but
+# `Hygiene` sits under `Personal Care`. `find_reference_choice` returns None for
+# a pair that is not live, so the rule silently never fires. T10 repairs the
+# live row; until then this is a known defect, not a passing check. See
+# `test_the_known_bad_pair_is_the_only_one`.
+KNOWN_BAD_SUBSTRING_ROW_ID = 78
+
+# Same silent-failure shape, found while writing the check above, and outside
+# the spec's V9, which covers only the two `finance` tables. Five
+# `parents_finance.auto_match` rows name `Grocery` or `Interest`, and neither
+# is a live `parents_finance` category, so those rules can never resolve.
+# Pinned explicitly so the set cannot grow unnoticed; needs its own task.
+KNOWN_DEAD_PARENT_CATEGORIES = {
+    "Grocery": (1,),
+    "Interest": (51, 147, 149, 150),
+}
+
+
+def _unquote(value: str) -> str:
+    return value.replace("''", "'")
+
+
+def _insert_lines(path: Path) -> list[str]:
+    return [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().upper().startswith("INSERT")
+    ]
+
+
+def finance_choices() -> list[dict[str, object]]:
+    """The live `finance` choice list, built from the tracked taxonomy DDL."""
+    ddl = Path(repo_root()) / "ddl" / "finance"
+    categories = {
+        int(cid): _unquote(name)
+        for cid, name in CATEGORIES_INSERT_RE.findall(
+            "\n".join(_insert_lines(ddl / "categories.sql"))
+        )
+    }
+    return [
+        {
+            "subcategory_id": int(sid),
+            "category_id": int(cid),
+            "subcategory_name": _unquote(name),
+            "category_name": categories[int(cid)],
+        }
+        for sid, name, cid, _ in SUBCATEGORIES_INSERT_RE.findall(
+            "\n".join(_insert_lines(ddl / "subcategories.sql"))
+        )
+    ]
+
+
+def parents_choices() -> dict[str, str]:
+    """`parents_finance` category id -> name, from the tracked DDL."""
+    path = Path(repo_root()) / "ddl" / "parents_finance" / "categories.sql"
+    return {
+        int(cid): _unquote(name)
+        for cid, name, _ in PARENTS_CATEGORIES_INSERT_RE.findall(
+            "\n".join(_insert_lines(path))
+        )
+    }
+
+
+@unittest.skipUnless(
+    (Path(repo_root()) / "ddl" / "seed").is_dir(),
+    "ddl/seed/ is absent (a fresh clone or CI); the live-pair check needs the "
+    "generated seed",
+)
+class TestAutoMatchRowsNameLivePairs(unittest.TestCase):
+    """V9: every auto-match row names a pair the taxonomy actually has.
+
+    `find_reference_choice` returns `None` for a pair that is not live, and the
+    caller treats `None` as "no mapping" rather than as an error. So a bad pair
+    does not fail loudly; the rule just silently never fires. This asserts the
+    pair set instead, which is the only place the problem is visible.
+
+    Skipped without `ddl/seed/`, so CI still runs it as a skip.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.seed = Path(repo_root()) / "ddl" / "seed"
+        cls.choices = finance_choices()
+
+    def test_the_fixture_parsed_a_real_taxonomy(self) -> None:
+        # Guard the vacuous pass. If the regexes stopped matching, the
+        # assertions below would pass over an empty list and prove nothing.
+        self.assertEqual(len(self.choices), 36, "expected 36 live subcategories")
+        names = {(c["category_name"], c["subcategory_name"]) for c in self.choices}
+        self.assertIn(("Misc", "Misc"), names)
+        self.assertIn(("Shopping", "Misc"), names)
+
+    def _unresolved_finance_rows(self) -> list[tuple]:
+        """Seed rows naming a pair the live taxonomy does not have."""
+        unresolved: list[tuple] = []
+        for table in (
+            "finance.merchant_name_auto_match",
+            "finance.substring_auto_match",
+        ):
+            path = self.seed / f"{table}.sql"
+            self.assertTrue(path.is_file(), f"missing {path.name}")
+            rows = SEED_ROW_RE.findall(path.read_text(encoding="utf-8"))
+            self.assertTrue(rows, f"{path.name}: parsed no rows")
+            for row_id, merchant, category, subcategory in rows:
+                if (
+                    find_reference_choice(
+                        self.choices, (_unquote(category), _unquote(subcategory))
+                    )
+                    is None
+                ):
+                    unresolved.append(
+                        (
+                            table,
+                            int(row_id),
+                            _unquote(merchant),
+                            _unquote(category),
+                            _unquote(subcategory),
+                        )
+                    )
+        return unresolved
+
+    def test_finance_auto_match_rows_name_live_pairs(self) -> None:
+        unresolved = self._unresolved_finance_rows()
+        known = [row for row in unresolved if row[1] == KNOWN_BAD_SUBSTRING_ROW_ID]
+        self.assertEqual(
+            len(known),
+            1,
+            f"expected exactly the known-bad row {KNOWN_BAD_SUBSTRING_ROW_ID}, "
+            f"found {known}",
+        )
+        other = [row for row in unresolved if row[1] != KNOWN_BAD_SUBSTRING_ROW_ID]
+        self.assertEqual(
+            [],
+            other,
+            f"{len(other)} row(s) name a (category, subcategory) pair that is not "
+            f"in the live taxonomy, so the rule can never resolve: {other[:5]}",
+        )
+
+    @unittest.expectedFailure
+    def test_the_known_bad_pair_is_repaired(self) -> None:
+        """Turns into an unexpected success the moment T10 repairs live.
+
+        `substring_auto_match` id 78 names ('Shopping', 'Hygiene') while
+        `Hygiene` sits under `Personal Care`. The rule can never resolve and
+        nothing reports it, which is the whole reason V9 exists. T10 repairs the
+        live row; this test then fails as an unexpected success, which is the
+        signal to delete the `expectedFailure` marker.
+        """
+        self.assertEqual([], self._unresolved_finance_rows())
+
+    def test_parents_auto_match_rows_name_live_categories(self) -> None:
+        # parents_finance is one level: a rule names a category, not a pair.
+        by_id = parents_choices()
+        self.assertEqual(len(by_id), 22, "expected 22 live parents categories")
+        live = set(by_id.values())
+
+        rows = PARENTS_SEED_ROW_RE.findall(
+            (self.seed / "parents_finance.auto_match.sql").read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(rows), 204, "expected 204 live parents auto_match rows")
+        self.assertEqual(
+            KNOWN_DEAD_PARENT_CATEGORIES,
+            {
+                category: tuple(
+                    int(row_id)
+                    for row_id, _, name in rows
+                    if _unquote(name) == category
+                )
+                for category in sorted({_unquote(name) for _, _, name in rows} - live)
+            },
+            "the set of parents rules naming a non-live category changed; every "
+            "one of those rules can never resolve",
+        )
+
+        substring_rows = PARENTS_SEED_ROW_RE.findall(
+            (self.seed / "parents_finance.substring_auto_match.sql").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertTrue(substring_rows, "parsed no parents substring rows")
+        unknown = sorted({_unquote(name) for _, _, name in substring_rows} - live)
+        self.assertEqual(
+            [],
+            unknown,
+            f"parents substring rules naming a non-live category: {unknown}",
         )
 
 
