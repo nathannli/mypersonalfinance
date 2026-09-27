@@ -1,4 +1,4 @@
-CREATE TABLE expenses (
+CREATE TABLE IF NOT EXISTS expenses (
     id serial NOT NULL,
     date date NOT NULL,
     merchant text NOT NULL,
@@ -11,4 +11,4 @@ CREATE TABLE expenses (
     CONSTRAINT expenses_subcategory_id_fkey FOREIGN KEY (subcategory_id) REFERENCES subcategories (id)
 );
 
-ALTER TABLE expenses ADD COLUMN comments TEXT;
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS comments TEXT;

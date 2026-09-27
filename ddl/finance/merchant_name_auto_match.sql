@@ -1,4 +1,4 @@
-CREATE TABLE merchant_name_auto_match (
+CREATE TABLE IF NOT EXISTS merchant_name_auto_match (
     id serial NOT NULL,
     merchant_name text NOT NULL,
     merchant_category text NOT NULL,

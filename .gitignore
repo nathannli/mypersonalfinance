@@ -32,3 +32,8 @@ trace.zip
 
 # Real bank statement descriptors. Private checkout only.
 tests/test_private_*.py
+
+# Real bank statement descriptors, exported from live by
+# scripts/export_ddl_seed.py. Private checkout only, same reason as
+# tests/test_private_*.py above: this repository is public.
+ddl/seed/
