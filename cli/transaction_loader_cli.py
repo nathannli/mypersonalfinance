@@ -153,10 +153,12 @@ Supported card types:
             if not os.path.isdir(folder_path):
                 raise ValueError(f"Folder does not exist: {folder_path}")
 
-            # Get all files in the folder
+            # Get all files in the folder, sorted so per-file results are
+            # reproducible: an unsorted listing lets a rolling export claim a
+            # row from a monthly statement that also contains it.
             all_files = [
                 os.path.join(folder_path, f)
-                for f in os.listdir(folder_path)
+                for f in sorted(os.listdir(folder_path))
                 if os.path.isfile(os.path.join(folder_path, f))
             ]
 

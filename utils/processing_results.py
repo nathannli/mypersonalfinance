@@ -16,6 +16,10 @@ RUN_COMPLETE = "complete"
 RUN_PARTIAL = "partial"
 RUN_FAILED = "failed"
 
+# Cross-file duplicates are reported so a rolling export that overlaps a
+# monthly statement is visible rather than silently absorbed.
+MAX_SHOWN_CROSS_FILE_DUPLICATES = 20
+
 
 class ProcessingResults:
     """
@@ -32,6 +36,7 @@ class ProcessingResults:
         self.totals = {status: 0 for status in TransactionStatus}
         self.unresolved_rows = []
         self.suggestion_ids = []
+        self.cross_file_duplicates = []
 
     def add_success(
         self,
@@ -112,6 +117,15 @@ class ProcessingResults:
         """Get number of failed files."""
         return len(self.failed_files)
 
+    def set_cross_file_duplicates(self, rows: Sequence[Mapping[str, object]]) -> None:
+        """Record rows this run saw again in a later file.
+
+        These are already counted as ``DUPLICATE`` outcomes, so this only adds
+        provenance: which file first carried the row.
+        """
+
+        self.cross_file_duplicates = list(rows)
+
     def has_failures(self) -> bool:
         """Check if any files failed to process."""
         return len(self.failed_files) > 0
@@ -183,6 +197,21 @@ class ProcessingResults:
             print(f"\n{len(self.suggestion_ids)} category suggestion(s):")
             for suggestion_id in self.suggestion_ids:
                 print(f"  - {suggestion_id}")
+
+        if self.cross_file_duplicates:
+            shown = self.cross_file_duplicates[:MAX_SHOWN_CROSS_FILE_DUPLICATES]
+            remaining = len(self.cross_file_duplicates) - len(shown)
+            print(
+                f"\n{len(self.cross_file_duplicates)} row(s) repeated across files "
+                "in this run (counted as duplicates above):"
+            )
+            for row in shown:
+                print(
+                    f"  - {row['date']} {row['merchant']} {row['cost']}: "
+                    f"also in {row['file']}, first seen in {row['first_seen_in']}"
+                )
+            if remaining > 0:
+                print(f"  ... and {remaining} more")
 
         print(
             f"\nTotal: {self.get_total_inserted()}/{self.get_total_transactions()} "
