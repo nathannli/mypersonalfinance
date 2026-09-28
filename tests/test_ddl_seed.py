@@ -280,6 +280,36 @@ class TrackedDdlHasNoMerchantRows(unittest.TestCase):
         )
 
 
+class AutoMatchUniqueConstraints(unittest.TestCase):
+    """T9/T8: the UNIQUE width each auto_match table is supposed to carry.
+
+    T9 narrowed `finance.merchant_name_auto_match` to `UNIQUE (merchant_name)`
+    so a merchant cannot be listed twice with two categories. T8 asserts
+    `finance.substring_auto_match` still holds its 3-column UNIQUE: substring
+    rules legitimately differ by category, so narrowing that one would delete
+    real rules rather than prevent bad ones.
+    """
+
+    def _constraint_line(self, table: str) -> str:
+        path = DDL_DIR / "finance" / f"{table}.sql"
+        self.assertTrue(path.is_file(), f"missing {path}")
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "UNIQUE (" in line:
+                return line.strip()
+        self.fail(f"{path.name} declares no UNIQUE")
+
+    def test_merchant_name_auto_match_unique_is_merchant_name_alone(self) -> None:
+        self.assertIn(
+            "UNIQUE (merchant_name)",
+            self._constraint_line("merchant_name_auto_match"),
+        )
+
+    def test_substring_auto_match_unique_stays_three_column(self) -> None:
+        line = self._constraint_line("substring_auto_match")
+        self.assertIn("merchant_category", line)
+        self.assertIn("merchant_subcategory", line)
+
+
 @unittest.skipUnless(
     seed_literals(),
     "ddl/seed/ is absent (a fresh clone or CI); the private descriptor check "

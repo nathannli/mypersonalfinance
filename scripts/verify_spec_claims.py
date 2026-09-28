@@ -167,9 +167,8 @@ def finance() -> None:
     n_m = scalar(db, "select count(*) from merchant_name_auto_match")
     check(n_m == 164, "F6 finance.merchant_name_auto_match = 164", f"got {n_m}")
     check(
-        uniques(db, "merchant_name_auto_match")
-        == ["(merchant_name, merchant_category, merchant_subcategory)"],
-        "F6b finance.merchant_name_auto_match UNIQUE is 3-column (real defect)",
+        uniques(db, "merchant_name_auto_match") == ["(merchant_name)"],
+        "F6b finance.merchant_name_auto_match UNIQUE is 1-column (T9)",
         f"got {uniques(db, 'merchant_name_auto_match')}",
     )
 
