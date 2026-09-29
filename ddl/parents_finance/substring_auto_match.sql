@@ -1,4 +1,4 @@
-CREATE TABLE substring_auto_match (
+CREATE TABLE IF NOT EXISTS substring_auto_match (
     id serial NOT NULL,
     substring text NOT NULL,
     merchant_category text NOT NULL,

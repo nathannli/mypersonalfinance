@@ -1,4 +1,4 @@
-CREATE TABLE expenses (
+CREATE TABLE IF NOT EXISTS expenses (
     id serial NOT NULL,
     date date NOT NULL,
     merchant text NOT NULL,
@@ -8,3 +8,5 @@ CREATE TABLE expenses (
     CONSTRAINT expenses_date_merchant_cost_key UNIQUE (date, merchant, cost),
     CONSTRAINT expenses_category_id_fkey FOREIGN KEY (category_id) REFERENCES categories (id)
 );
+
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS comments TEXT;

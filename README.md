@@ -1,98 +1,139 @@
 # personal finance
-database: postgres <br>
-backend logic: python <br>
-frontend: metabase <br>
+
+Personal finance transaction loaders for two PostgreSQL databases.
+
+- **database**: PostgreSQL — `finance` and `parents_finance`
+- **backend**: Python
+- **frontend**: Metabase
+
+Two databases, two shapes. `finance` is a two-level taxonomy
+(`categories` → `subcategories` → `expense_type`). `parents_finance` is
+one level (`main_category` → `categories`, no subcategory) and keeps its own
+naming. They are not converged on each other, and their taxonomy id conventions
+are inverted. See [Database schema and rebuild](ddl/README.md).
 
 ## setup
 
-```bash
-uv sync --group dev
+```sh
+uv sync --frozen --group dev
 uv run pre-commit install
+cp env-sample .env    # then fill it in
 ```
 
-## common commands
+`--frozen` is load-bearing. `uv.lock` carries a `../Wealthsimpleton` path
+source that exists on a developer machine and on no CI runner, so re-resolving
+dies with `Distribution not found at: file:///.../Wealthsimpleton`. Plain
+`uv run` re-resolves and hits it.
 
-load card or bank transactions from files:
-```bash
-uv run python load-transactions.py --type <card_type> --filepath <path_to_csv> --database finance
+## tests and lint
+
+```sh
+uv run --frozen python -m unittest discover -s tests -p 'test_*.py'
+uv run ruff check
+uv run ruff format --check
 ```
 
-load online wealthsimple transactions:
-```bash
-uv sync --extra wealthsimple
-uv run python load-transactions.py --type ws_debit --database finance
-uv run python load-transactions.py --type ws_credit --database finance
+755 tests, all offline: no database, no network. CI runs the same two gates on
+Python 3.13 — `pre-commit` and the full unit suite — so a red test fails the PR.
+
+Note the discovery form. `tests/` is not a package, so
+`uv run python -m unittest tests.test_x` fails; use `discover -s tests`.
+
+## loading transactions
+
+Load card or bank transactions from files:
+
+```sh
+uv run --frozen python load-transactions.py --type cibc_mc --filepath statement.csv --database finance
+uv run --frozen python load-transactions.py --type cibc_mc --folder statements/ --database finance
 ```
 
-load pre-categorized excel transactions:
-```bash
-uv run python load-excel-transactions.py --filepath <path_to_excel>
+`--type` comes from the registry in `sources/registry.py`:
+`amex`, `amex_annual`, `bmo`, `canadian_tire`, `cibc_mc`, `rbc_cc`, `rogers`,
+`simplii_debit`, `simplii_visa`, `td_debit`, `td_visa`. `--database` is
+required and is `finance` or `parents_finance`. File-based types need
+`--filepath` or `--folder`; online types need neither.
+
+Load online Wealthsimple transactions:
+
+```sh
+uv sync --frozen --extra wealthsimple
+uv run --frozen python load-transactions.py --type ws_debit --database finance
+uv run --frozen python load-transactions.py --type ws_credit --database finance
 ```
 
-## download Amex Canada transactions
+The `wealthsimple` extra is the only thing that pulls the sibling
+`../Wealthsimpleton` checkout. Nothing else imports it; only error strings name
+it.
 
-The unattended Amex workflow requires macOS and Python 3.12+. Default
-Browserbase route requires Browse CLI and `BROWSERBASE_API_KEY`. BrowserOS route
-starts BrowserOS neo when needed, then connects to `BROWSEROS_MCP_URL` (default:
-`http://127.0.0.1:9010/mcp`). Both routes use local `.env` values for
-`AMEX_USER` and `AMEX_PASSWORD`; grant Full Disk Access to terminal app so
-`macos-messages` can read incoming Amex SMS code.
+Load pre-categorized Excel transactions:
 
-For Fish users, load the existing secrets file before running the command:
-
-```fish
-source ~/.config/fish/secrets.fish
+```sh
+uv run --frozen python load-excel-transactions.py --filepath <path_to_excel>
 ```
 
-Download the latest statement activity without loading it into PostgreSQL:
+`bin/parents-db-cron.sh` runs this over FTP-fetched workbooks and reports
+failures to Discord; `cron/crontab` schedules it.
 
-```bash
-uv run python -m scripts.download_amex_transactions \
+## database rebuild
+
+`ddl/` rebuilds both databases from scratch: schema, constraints, and taxonomy,
+with 0 `expenses` rows. Merchant seed rows are gitignored and regenerated from
+live, because this repository is public and those rows name real merchants.
+
+[ddl/README.md](ddl/README.md) has the apply order, the schema-vs-seed split,
+the export command, and the rebuild recipe. The short version:
+
+```sh
+uv run --frozen python scripts/export_ddl_seed.py --database finance
+uv run --frozen python scripts/verify_spec_claims.py   # checks ddl/ against live
+```
+
+`verify_spec_claims.py` needs a live connection and `gh`, so it is not in the
+unit suite and never runs in CI. Run it before and after editing `ddl/`.
+
+## downloading Amex Canada transactions
+
+The unattended Amex workflow requires macOS and Python 3.12+. The default
+Browserbase route requires Browse CLI and `BROWSERBASE_API_KEY`. The BrowserOS
+route starts BrowserOS neo when needed, then connects to `BROWSEROS_MCP_URL`
+(default `http://127.0.0.1:9010/mcp`). Both routes read `AMEX_USER` and
+`AMEX_PASSWORD` from the repository `.env`; grant Full Disk Access to the
+terminal app so `macos-messages` can read the incoming Amex SMS code.
+
+```sh
+uv run --frozen python -m scripts.download_amex_transactions \
   --output-dir ~/Downloads/amex \
   --database finance
 ```
 
-Use `--database parents_finance` when that is the intended loader target. The
-database argument is required only to produce the correct handoff command; the
-downloader never connects to PostgreSQL or runs the loader.
+Download the latest statement activity without loading it into PostgreSQL. Use
+`--database parents_finance` when that is the intended loader target; the
+argument is required only to produce the correct handoff command, because the
+downloader never connects to PostgreSQL or runs the loader. The workflow
+supports an account with exactly one Amex card. `--months` accepts specific
+months as well as `latest`.
 
-Set this local `.env` value to use BrowserOS neo instead of Browserbase:
+To use BrowserOS neo instead of Browserbase, set `AMEX_BROWSER_BACKEND=browseros`
+in `.env`. That route opens a task-owned tab, reuses its authenticated profile
+when available, and otherwise fills `AMEX_USER`/`AMEX_PASSWORD`, selects SMS
+delivery, reads a recent Amex code through `macos-messages`, and submits it.
 
-```sh
-AMEX_BROWSER_BACKEND=browseros
-```
-
-Then run:
-
-```bash
-uv run python -m scripts.download_amex_transactions \
-  --output-dir ~/Downloads/amex \
-  --database finance \
-  --months latest 2026-07 2026-06 2026-05
-```
-
-Browserbase remains default. `AMEX_BROWSER_BACKEND=browseros` opens a BrowserOS neo task-owned tab,
-reuses its authenticated profile when available, and otherwise fills
-`AMEX_USER`/`AMEX_PASSWORD` from `.env`, selects SMS delivery, retrieves recent
-Amex SMS code through `macos-messages`, and submits it. CAPTCHA and unexpected
-security challenges stop with an actionable error.
-
-After authentication, automation navigates through `Statement` ->
-`Export Statement Data` -> `Go to Statement Activity`, dismisses the first-run
-welcome dialog when present, opens `Download`, selects CSV, retrieves the
-Browserbase session download archive, moves the single CSV into `--output-dir`,
-validates it through `AmexStatement`, and prints the exact
-`load-transactions.py` command. Run that printed command separately when ready
-to load the transactions.
+After authentication, automation navigates `Statement` → `Export Statement
+Data` → `Go to Statement Activity`, dismisses the first-run welcome dialog when
+present, opens `Download`, selects CSV, retrieves the session download archive,
+moves the single CSV into `--output-dir`, validates it through `AmexStatement`,
+and prints the exact `load-transactions.py` command. Run that command
+separately when ready to load.
 
 Security boundaries:
 
-- Amex credentials are read from existing `.env` values and entered only into the
-  live Amex login form. Recent Amex MFA codes are used only in memory for the
-  Browserbase form; credentials and codes are never printed or passed as CLI
-  arguments. `BROWSERBASE_API_KEY` is required only to start the remote session.
-- Browserbase and BrowserOS session state plus statement data are used only for
-  this run; none of these artifacts may be committed.
+- Amex credentials are read from existing `.env` values and entered only into
+  the live Amex login form. Recent MFA codes are used only in memory for the
+  form; credentials and codes are never printed or passed as CLI arguments.
+  `BROWSERBASE_API_KEY` is required only to start the remote session.
+- Session state and statement data are used only for this run and may not be
+  committed.
 - Keep `--output-dir` outside the repository. Existing files are never silently
   overwritten.
 - Authentication and security challenges always require user action; the tool
@@ -100,30 +141,26 @@ Security boundaries:
 
 Troubleshooting:
 
-- Missing `BROWSERBASE_API_KEY`: export it before running the command, for example
-  by sourcing the shell secrets file that defines it.
-- BrowserOS endpoint unavailable: confirm `BROWSEROS_MCP_URL` points to its
-  local MCP endpoint. The route starts `BrowserOS neo` automatically and waits
-  up to 30 seconds for endpoint.
-- `macos-messages` cannot read SMS: grant Full Disk Access to the terminal app in
-  macOS System Settings, then rerun.
-- Missing download after CSV selection: confirm the Browserbase session download
-  archive contains exactly one CSV, then retry with a fresh session.
-- Authentication timeout: rerun the command and finish login/MFA within five
-  minutes.
+- Missing `BROWSERBASE_API_KEY`: export it before running, e.g. by sourcing the
+  shell secrets file that defines it.
+- BrowserOS endpoint unavailable: confirm `BROWSEROS_MCP_URL` points at its
+  local MCP endpoint. The route starts BrowserOS neo and waits up to 30s.
+- `macos-messages` cannot read SMS: grant Full Disk Access to the terminal app
+  in macOS System Settings, then rerun.
+- Missing download after CSV selection: confirm the session download archive
+  contains exactly one CSV, then retry with a fresh session.
+- Authentication timeout: rerun and finish login/MFA within five minutes.
 - Missing `Statement`, `Export Statement Data`, CSV, or `Download`: Amex likely
   changed the page; stop and update the locators before retrying.
-- Zero or multiple cards: this workflow supports an account with exactly one
-  Amex card.
 - Existing or stale partial file: choose another output directory or move the
-  named file before retrying. The downloader will not overwrite it.
+  named file first. The downloader will not overwrite it.
 - Parser validation failure: retain the completed export locally and update
   `AmexStatement` for the observed schema; do not load the file first.
 
 Manual authenticated acceptance test:
 
 1. Run the downloader with an empty output directory and the intended database.
-2. Complete login/MFA in the Browserbase live session.
+2. Complete login/MFA in the live session.
 3. Confirm automation opens statement export, selects CSV, and downloads one
    complete file.
 4. Confirm the output file parses to exactly `date`, `merchant`, `cost`, and
@@ -137,9 +174,9 @@ Manual authenticated acceptance test:
 
 Unknown transactions are categorized by an LLM instead of an interactive
 prompt, so `load-transactions.py` and `load-excel-transactions.py` both finish
-without user input. Existing deterministic matching (card category rules,
-exact merchant auto-match, substring auto-match) always runs first and always
-wins; a matched transaction makes no provider request.
+without user input. Existing deterministic matching (card category rules, exact
+merchant auto-match, substring auto-match) always runs first and always wins; a
+matched transaction makes no provider request.
 
 ### Environment
 
@@ -157,17 +194,16 @@ TRANSACTION_LLM_MODE=shadow
 `anthropic/claude-haiku-4-5` and never changes the parents path. Only the
 configured base URL and the exact configured model are ever called; there is no
 provider or model fallback. A missing or empty `OPENCODEX_API_KEY` becomes a
-`provider_error` on the first LLM call, so deterministic-only runs do not need a
-key.
+`provider_error` on the first LLM call, so deterministic-only runs need no key.
 
-`OPENCODEX_BASE_URL` is part of the enriched write approval identity (V30), and
-only trailing slashes and surrounding whitespace are normalized. Host spelling
-and port are significant, so `http://127.0.0.1:10102` and
+`OPENCODEX_BASE_URL` is part of the enriched write approval identity, and only
+trailing slashes and surrounding whitespace are normalized. Host spelling and
+port are significant, so `http://127.0.0.1:10102` and
 `http://localhost:10102` are different identities and only the exact approved
 string verifies. The macmini reaches opencodex on the unauthenticated loopback
 listener at `http://127.0.0.1:10102`; external ssh hosts use the token-gated LAN
-listener on `10100`. Changing this value invalidates the existing enriched
-approval and requires a fresh three-pass gate.
+listener on `10100`. Changing this invalidates the existing enriched approval
+and requires a fresh three-pass gate.
 
 ### Research-first workflow
 
@@ -297,8 +333,8 @@ passing validation runs:
 Validate the protocol you are approving:
 
 ```sh
-uv run python validate-transaction-llm-gold.py --database finance --enriched
-uv run python validate-transaction-llm-gold.py --database parents_finance
+uv run --frozen python validate-transaction-llm-gold.py --database finance --enriched
+uv run --frozen python validate-transaction-llm-gold.py --database parents_finance
 ```
 
 All private files resolve from the repository root, never the process working
@@ -317,6 +353,10 @@ versions change. Unenriched and enriched approvals never authorize each other.
 The automated test suite makes no network requests; it drives fake
 categorizers only.
 
-# custom packages:
-- custom version of https://github.com/ImranR98/Wealthsimpleton that has been modified to be a pip-installable package
-- `uv` resolves `wealthsimpleton` from the local `../Wealthsimpleton` checkout
+## custom packages
+
+- Custom version of <https://github.com/ImranR98/Wealthsimpleton>, modified to
+  be a pip-installable package.
+- `uv` resolves `wealthsimpleton` from the local `../Wealthsimpleton` checkout,
+  behind the `wealthsimple` extra. It is absent from CI and from any fresh
+  clone, which is why every command here passes `--frozen`.

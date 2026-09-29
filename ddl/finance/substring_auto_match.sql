@@ -1,4 +1,4 @@
-CREATE TABLE substring_auto_match (
+CREATE TABLE IF NOT EXISTS substring_auto_match (
     id serial NOT NULL,
     substring text NOT NULL,
     merchant_category text NOT NULL,
@@ -9,9 +9,3 @@ CREATE TABLE substring_auto_match (
     -- Used as fallback when exact merchant name match fails in merchant_name_auto_match
     -- entries should be added manually based on finding sure patterns from the merchant_name_auto_match table
 );
-
-
-INSERT INTO substring_auto_match (substring, merchant_category, merchant_subcategory) VALUES ('uber', 'Commuting', 'Rides');
-INSERT INTO substring_auto_match (substring, merchant_category, merchant_subcategory) VALUES ('presto', 'Full Reimburse', 'Full Reimburse');
-INSERT INTO substring_auto_match (substring, merchant_category, merchant_subcategory) VALUES ('rumble boxing', 'Entertainment', 'Hobbies');
-INSERT INTO substring_auto_match (substring, merchant_category, merchant_subcategory) VALUES ('golf', 'Entertainment', 'Hobbies');
