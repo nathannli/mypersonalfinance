@@ -138,3 +138,22 @@ uv run --frozen python scripts/verify_spec_claims.py
 
 It needs a live connection and `gh`, so it is not part of the unit suite and
 never runs in CI. Run it before and after editing anything in `ddl/`.
+
+`scripts/rebuild_ddl_scratch.py` proves the rebuild recipe above still works.
+It builds both databases into scratch databases with distinct names, applies
+the tracked tree plus the generated seed, and asserts parity with live:
+column-for-column across all 11 tables, id sequences including the 6 and 16
+gaps, `expenses` empty, `parents_finance.expenses.comments` present, every
+seeded sequence past its max id, the whole tree re-applied with 0 rows inserted
+and 0 errors, and every live `parents_finance` `category_id` replayed into the
+scratch copy resolving to the same category name. It then drops both scratch
+databases and never writes to live:
+
+```sh
+uv run --frozen python scripts/rebuild_ddl_scratch.py
+```
+
+It needs a live connection and an exported `ddl/seed/`, so like
+`scripts/verify_spec_claims.py` it is not part of the unit suite and never runs
+in CI. Run it after changing anything in the tree itself: a schema or seed edit
+can pass every claim check and still break the rebuild.
