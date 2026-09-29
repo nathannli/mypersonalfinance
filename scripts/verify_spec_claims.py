@@ -187,8 +187,8 @@ def finance() -> None:
         "from substring_auto_match where id=78",
     )
     check(
-        r78 == [("paula's choice", "Shopping", "Hygiene")],
-        "F8 finance.substring_auto_match id 78 is the broken pair",
+        r78 == [("paula's choice", "Personal Care", "Hygiene")],
+        "F8 finance.substring_auto_match id 78 is the repaired pair (T10)",
         f"got {r78}",
     )
 
@@ -245,8 +245,8 @@ def finance() -> None:
         "s.category_id=(select id from categories where name=m.merchant_category))",
     )
     check(
-        len(orphan_s) == 1 and orphan_s[0][0] == "paula's choice",
-        "F14 exactly one orphan substring rule, paula's choice",
+        not orphan_s,
+        "F14 zero orphan substring rules (T10 repaired the last one)",
         f"got {orphan_s}",
     )
 

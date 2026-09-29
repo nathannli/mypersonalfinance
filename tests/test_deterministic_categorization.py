@@ -255,12 +255,13 @@ PARENTS_SEED_ROW_RE = re.compile(
     r"VALUES \((\d+), '((?:[^']|'')*)', '((?:[^']|'')*)'\)", re.IGNORECASE
 )
 
-# `finance.substring_auto_match` id 78 names ('Shopping', 'Hygiene'), but
+# `finance.substring_auto_match` id 78 named ('Shopping', 'Hygiene'), but
 # `Hygiene` sits under `Personal Care`. `find_reference_choice` returns None for
-# a pair that is not live, so the rule silently never fires. T10 repairs the
-# live row; until then this is a known defect, not a passing check. See
-# `test_the_known_bad_pair_is_the_only_one`.
-KNOWN_BAD_SUBSTRING_ROW_ID = 78
+# a pair that is not live, so the rule silently never fired. T10 retargeted it
+# to ('Personal Care', 'Hygiene'), the pair every other `Hygiene` rule already
+# named, so this id is now a repaired row and the tests assert it stays fixed.
+# See `test_the_repaired_row_names_the_pair_the_rest_of_the_table_asserts`.
+T10_REPAIRED_SUBSTRING_ROW_ID = 78
 
 # T24 repaired this set, so it is now empty and the check below asserts it
 # stays empty. It was once five rows naming `Grocery` or `Interest`, neither a
@@ -378,30 +379,58 @@ class TestAutoMatchRowsNameLivePairs(unittest.TestCase):
 
     def test_finance_auto_match_rows_name_live_pairs(self) -> None:
         unresolved = self._unresolved_finance_rows()
-        known = [row for row in unresolved if row[1] == KNOWN_BAD_SUBSTRING_ROW_ID]
-        self.assertEqual(
-            len(known),
-            1,
-            f"expected exactly the known-bad row {KNOWN_BAD_SUBSTRING_ROW_ID}, "
-            f"found {known}",
-        )
-        other = [row for row in unresolved if row[1] != KNOWN_BAD_SUBSTRING_ROW_ID]
         self.assertEqual(
             [],
-            other,
-            f"{len(other)} row(s) name a (category, subcategory) pair that is not "
-            f"in the live taxonomy, so the rule can never resolve: {other[:5]}",
+            unresolved,
+            f"{len(unresolved)} row(s) name a (category, subcategory) pair that is "
+            f"not in the live taxonomy, so the rule can never resolve: "
+            f"{unresolved[:5]}",
         )
 
-    @unittest.expectedFailure
-    def test_the_known_bad_pair_is_repaired(self) -> None:
-        """Turns into an unexpected success the moment T10 repairs live.
+    def test_the_repaired_row_names_the_pair_the_rest_of_the_table_asserts(
+        self,
+    ) -> None:
+        """T10's target was not a guess, so pin why it is right.
 
-        `substring_auto_match` id 78 names ('Shopping', 'Hygiene') while
-        `Hygiene` sits under `Personal Care`. The rule can never resolve and
-        nothing reports it, which is the whole reason V9 exists. T10 repairs the
-        live row; this test then fails as an unexpected success, which is the
-        signal to delete the `expectedFailure` marker.
+        Id 78 now names `('Personal Care', 'Hygiene')`. Every other `Hygiene`
+        rule in the table already named that pair, and `paula's choice` is a
+        cosmetics brand among 12 other `Personal Care` merchants. If a future
+        taxonomy move renames or reparents `Hygiene`, this fails instead of the
+        repair silently becoming another dead rule.
+        """
+        rows = SEED_ROW_RE.findall(
+            (self.seed / "finance.substring_auto_match.sql").read_text(encoding="utf-8")
+        )
+        by_id = {int(row[0]): row for row in rows}
+        self.assertIn(T10_REPAIRED_SUBSTRING_ROW_ID, by_id)
+        row = by_id[T10_REPAIRED_SUBSTRING_ROW_ID]
+        self.assertEqual(
+            ("paula's choice", "Personal Care", "Hygiene"),
+            (_unquote(row[1]), _unquote(row[2]), _unquote(row[3])),
+        )
+
+        pairs = [
+            (_unquote(r[2]), _unquote(r[3]))
+            for r in rows
+            if _unquote(r[3]) == "Hygiene"
+            and int(r[0]) != T10_REPAIRED_SUBSTRING_ROW_ID
+        ]
+        self.assertTrue(pairs, "expected other Hygiene rules in the table")
+        self.assertEqual(
+            {("Personal Care", "Hygiene")},
+            set(pairs),
+            "the other Hygiene rules no longer agree on the pair, so the "
+            "repaired row's category is no longer supported by the table",
+        )
+
+    def test_the_known_bad_pair_is_repaired(self) -> None:
+        """T10 repaired id 78, so the whole set must now be empty.
+
+        It was the one rule naming `('Shopping', 'Hygiene')` while `Hygiene`
+        sits under `Personal Care`. Such a rule can never resolve and nothing
+        reported it, which is the whole reason V9 exists. T10 retargeted it to
+        `('Personal Care', 'Hygiene')` -- the pair all 4 other `Hygiene` rows
+        already named -- so this now runs as a real assertion and stays one.
         """
         self.assertEqual([], self._unresolved_finance_rows())
 
