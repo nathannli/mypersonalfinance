@@ -33,7 +33,7 @@ uv run ruff check
 uv run ruff format --check
 ```
 
-755 tests, all offline: no database, no network. CI runs the same two gates on
+756 tests, all offline: no database, no network. CI runs the same two gates on
 Python 3.13 — `pre-commit` and the full unit suite — so a red test fails the PR.
 
 Note the discovery form. `tests/` is not a package, so
@@ -136,8 +136,9 @@ Security boundaries:
   committed.
 - Keep `--output-dir` outside the repository. Existing files are never silently
   overwritten.
-- Authentication and security challenges always require user action; the tool
-  does not bypass Amex controls or use Playwright.
+- SMS MFA and the Trust Device prompt are handled automatically. CAPTCHA or
+  other security challenges may require user action; the tool does not bypass
+  Amex controls or use Playwright.
 
 Troubleshooting:
 
@@ -210,7 +211,8 @@ and requires a fresh three-pass gate.
 Enriched `finance` categorization answers unknown merchants from frozen,
 human-approved research packets. The load path never calls the web.
 
-1. Research: `research-transaction-merchants.py --database finance` discovers
+1. Research: `uv run --frozen python research-transaction-merchants.py --type amex
+   --folder ~/Downloads/amex/ --database finance` discovers
    current deterministic unknowns, queries TinyFish once per merchant, and
    writes a pending packet per merchant. Add `--refresh` to re-research a
    merchant whose evidence changed.
@@ -218,7 +220,8 @@ human-approved research packets. The load path never calls the web.
    `--approve <packet_id>` or `--reject <packet_id> --reason <text>` offline.
    Approval binds the exact `packet_sha256`; a successful refresh returns the
    packet to pending.
-3. Load: `load-transactions.py --type amex --database finance` consumes only
+3. Load: `uv run --frozen python load-transactions.py --type amex --folder
+   ~/Downloads/amex/ --database finance` consumes only
    approved packets. A `suggest_new` result is recorded for review, never
    inserted.
 4. Review suggestions: inspect the private suggestion artifact and decide
