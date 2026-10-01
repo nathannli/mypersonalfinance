@@ -34,6 +34,8 @@ MAX_TOTP_ATTEMPTS = 2
 MAX_LOAD_MORE_CLICKS = 200
 EVALUATE_MAX_CHARS = 5_000_000
 LOGIN_REJECTED_AFTER_SECONDS = 20
+MAX_ACTIVITY_NAVIGATIONS = 2
+NAVIGATION_SETTLE_SECONDS = 3
 CHALLENGE_MARKERS = (
     "captcha",
     "text message",
@@ -123,6 +125,11 @@ def is_activity_page(current: str, target: str) -> bool:
     ) == account_ids(target)
 
 
+def is_logged_in_elsewhere(current: str) -> bool:
+    path = urlparse(page_url(current)).path
+    return path.startswith("/app/") and not path.startswith("/app/login")
+
+
 def refs_for_role(current: str, role: str) -> list[str]:
     return re.findall(rf"- {re.escape(role)}\b[^\n]*\[ref=(e\d+)\]", current)
 
@@ -186,6 +193,7 @@ async def authenticate(
     deadline = time.monotonic() + timeout
     credentials_sent_at: float | None = None
     totp_steps: list[int] = []
+    navigations = 0
     while time.monotonic() < deadline:
         current = await snapshot(session, page)
         try:
@@ -197,6 +205,15 @@ async def authenticate(
             continue
         if is_activity_page(current, target):
             return
+        if is_logged_in_elsewhere(current):
+            if navigations >= MAX_ACTIVITY_NAVIGATIONS:
+                raise RuntimeError(
+                    "Wealthsimple did not open the account activity page"
+                )
+            await session.call("navigate", {"page": page, "url": target})
+            navigations += 1
+            await asyncio.sleep(NAVIGATION_SETTLE_SECONDS)
+            continue
         if "Check your authenticator" in current:
             step = int(time.time() // TOTP_STEP_SECONDS)
             if not totp_steps or step != totp_steps[-1]:
