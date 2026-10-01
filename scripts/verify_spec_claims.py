@@ -157,7 +157,11 @@ def finance() -> None:
     )
 
     n_exp = scalar(db, "select count(*) from expenses")
-    check(n_exp == 3063, "F5 finance.expenses row count = 3063", f"got {n_exp}")
+    check(
+        n_exp >= 3063,
+        "F5 finance.expenses row count >= 3063 (2026-09-27 baseline)",
+        f"got {n_exp}",
+    )
     check(
         "(date, merchant, cost)" in uniques(db, "expenses"),
         "F5b finance.expenses UNIQUE (date, merchant, cost)",
