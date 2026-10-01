@@ -17,14 +17,6 @@ dependencies = [
     "sqlalchemy",
 ]
 
-[project.optional-dependencies]
-wealthsimple = [
-    "wealthsimpleton",
-]
-
-[tool.uv.sources]
-wealthsimpleton = { path = "../Wealthsimpleton" }
-
 [dependency-groups]
 dev = [
     "pre-commit",

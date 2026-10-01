@@ -60,8 +60,8 @@ Usage Examples:
   Multiple files in folder:
     python load-cc-transactions.py --type cibc_mc --folder /path/to/statements/ --database finance
 
-  Wealthsimple (online, no file needed):
-    python load-cc-transactions.py --type ws_debit --database finance
+  Wealthsimple (download first with scripts/download_wealthsimple_transactions.py):
+    python load-cc-transactions.py --type ws_debit --filepath /path/to/ws-debit.csv --database finance
 
 Supported card types:
   {card_types_str}

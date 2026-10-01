@@ -14,8 +14,8 @@ Examples:
     # Multiple files
     python load-transactions.py --type cibc_mc --folder statements/
 
-    # Online source
-    python load-transactions.py --type ws_debit
+    # Wealthsimple activity downloaded by scripts/download_wealthsimple_transactions.py
+    python load-transactions.py --type ws_debit --filepath ws-debit.csv
 
 For more information, run with --help
 """

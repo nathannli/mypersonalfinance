@@ -1,34 +1,32 @@
 import polars as pl
 
-from sources.base import OnlineCardStatement
-from wealthsimpleton import wealthsimpleton as ws
+from sources.base import FileBasedCardStatement
 
 
-class WealthsimpleDebitStatement(OnlineCardStatement):
-    def __init__(self):
-        super().__init__(type="ws_debit")
+class WealthsimpleDebitStatement(FileBasedCardStatement):
+    def __init__(self, file_path: str):
+        super().__init__(type="ws_debit", file_path=file_path)
 
     def load_data(self) -> None:
         """
-        Load and process Wealthsimple transaction data from a CSV file.
+        Load Wealthsimple chequing activity scraped by
+        scripts/download_wealthsimple_transactions.py.
 
-        This function reads a CSV file containing Wealthsimple transaction data, identifies
-        the header row, extracts relevant columns, and transforms the data into a
-        standardized format for database insertion.
-
-        Args:
-            file_path: Path to the CSV file containing Wealthsimple transaction data
-
-        Returns:
-            pl.DataFrame: Processed DataFrame with standardized column names and data types
-
-        Raises:
-            ValueError: If the file doesn't exist or required headers can't be found
+        The CSV holds the raw activity fields description, type, amount, and
+        date; this transforms them into the standardized format for database
+        insertion.
         """
-        transactions: list[dict] = ws.get_transactions(
-            account_activity_url_suffix=self.config.ws_debt_link
+        df = pl.read_csv(
+            self.file_path,
+            schema={
+                "description": pl.Utf8,
+                "type": pl.Utf8,
+                "amount": pl.Utf8,
+                "date": pl.Utf8,
+            },
         )
-        df = pl.DataFrame(transactions)
+        # Transfers and interest carry the account label ("Chequing • <nickname>")
+        # where other rows carry their type.
         df1 = df.filter(
             ~(
                 pl.col("type").is_in(
@@ -39,6 +37,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
                         "Electronic funds transfer",
                     ]
                 )
+                | pl.col("type").str.starts_with("Chequing • ")
             )
         )
 
@@ -111,7 +110,7 @@ class WealthsimpleDebitStatement(OnlineCardStatement):
         df5 = df4.with_columns(pl.lit(None).alias("cc_category"))
 
         # Convert date strings to date objects
-        df6 = df5.with_columns(pl.col("date").str.to_date(format="%Y-%m-%dT%H:%M:%S"))
+        df6 = df5.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
 
         # parse float values from after the $ sign
         df7 = df6.with_columns(

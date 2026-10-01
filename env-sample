@@ -1,7 +1,10 @@
 # rename this file to .env
 POSTGRES_CONNECTION_STRING=postgresql://username:password@host_name_or_ip:postgres_port_number
-WS_DEBT_LINK=https://my.wealthsimple.com/copy-this-part-into-here
+WS_DEBIT_LINK=https://my.wealthsimple.com/copy-this-part-into-here
 WS_CREDIT_LINK=https://my.wealthsimple.com/copy-this-part-into-here
+WS_EMAIL=your_wealthsimple_email
+WS_PASSWORD=your_wealthsimple_password
+WS_TOTP_SECRET=your_wealthsimple_authenticator_setup_key
 AMEX_BROWSER_BACKEND=browseros
 BROWSEROS_MCP_URL=http://127.0.0.1:9010/mcp
 AMEX_USER=your_amex_user_id

@@ -20,10 +20,8 @@ uv run pre-commit install
 cp env-sample .env    # then fill it in
 ```
 
-`--frozen` is load-bearing. `uv.lock` carries a `../Wealthsimpleton` path
-source that exists on a developer machine and on no CI runner, so re-resolving
-dies with `Distribution not found at: file:///.../Wealthsimpleton`. Plain
-`uv run` re-resolves and hits it.
+`--frozen` installs exactly what `uv.lock` pins without re-resolving, so a
+local run matches CI.
 
 ## tests and lint
 
@@ -50,21 +48,17 @@ uv run --frozen python load-transactions.py --type cibc_mc --folder statements/ 
 
 `--type` comes from the registry in `sources/registry.py`:
 `amex`, `amex_annual`, `bmo`, `canadian_tire`, `cibc_mc`, `rbc_cc`, `rogers`,
-`simplii_debit`, `simplii_visa`, `td_debit`, `td_visa`. `--database` is
-required and is `finance` or `parents_finance`. File-based types need
-`--filepath` or `--folder`; online types need neither.
+`simplii_debit`, `simplii_visa`, `td_debit`, `td_visa`, `ws_debit`, `ws_credit`.
+`--database` is required and is `finance` or `parents_finance`. Every type
+needs `--filepath` or `--folder`.
 
-Load online Wealthsimple transactions:
+Load Wealthsimple transactions from a CSV written by the Wealthsimple
+downloader (see [downloading Wealthsimple transactions](#downloading-wealthsimple-transactions)):
 
 ```sh
-uv sync --frozen --extra wealthsimple
-uv run --frozen python load-transactions.py --type ws_debit --database finance
-uv run --frozen python load-transactions.py --type ws_credit --database finance
+uv run --frozen python load-transactions.py --type ws_debit --filepath ws-debit.csv --database finance
+uv run --frozen python load-transactions.py --type ws_credit --filepath ws-credit.csv --database finance
 ```
-
-The `wealthsimple` extra is the only thing that pulls the sibling
-`../Wealthsimpleton` checkout. Nothing else imports it; only error strings name
-it.
 
 Load pre-categorized Excel transactions:
 
@@ -170,6 +164,60 @@ Manual authenticated acceptance test:
    database but is not executed automatically.
 6. Run the downloader again with the same statement filename and confirm it
    refuses to overwrite the first file.
+
+## downloading Wealthsimple transactions
+
+The Wealthsimple downloader logs in through BrowserOS neo, the same local
+browser the Amex BrowserOS route uses, and scrapes the account's activity page.
+It reads `WS_EMAIL`, `WS_PASSWORD`, `WS_TOTP_SECRET`, `WS_DEBIT_LINK` and
+`WS_CREDIT_LINK` from the repository `.env`. `WS_TOTP_SECRET` is the setup key
+shown when an authenticator app is added to the Wealthsimple account.
+
+```sh
+uv run --frozen python -m scripts.download_wealthsimple_transactions \
+  --output-dir ~/Downloads/wealthsimple \
+  --database finance \
+  --account debit \
+  --since 2026-09-01
+```
+
+`--account` is `debit` (chequing) or `credit` (credit card). `--since` is the
+oldest transaction date to keep; pick a date that overlaps the last load, and the
+loader's `(date, merchant, cost)` duplicate check skips rows already loaded. The
+downloader writes `ws-<account>-<since>-<today>.csv`, validates it through the
+`ws_debit` or `ws_credit` parser, and prints the exact `load-transactions.py`
+command. It never connects to PostgreSQL or runs the loader.
+
+Login is unattended. After the password, Wealthsimple offers a passkey for about
+two minutes; the downloader then clicks `Try another way` and enters a TOTP code
+generated from `WS_TOTP_SECRET`. It leaves "Don't ask me for a code for the next
+30 days" unticked. A run that starts already logged in skips login entirely.
+
+The activity page lists 50 rows per `Load more` click under date headings. The
+downloader clicks `Load more` until it loads a row older than `--since`, then
+reads every row's description, type, amount and date heading.
+
+Security boundaries:
+
+- Credentials and TOTP codes are sent only inside BrowserOS fill requests to the
+  loopback MCP endpoint, and only after the page is on `wealthsimple.com`. They
+  are never printed, logged, or passed as CLI arguments.
+- The page reader returns visible activity text only; it never reads cookies,
+  storage, or form values.
+- Keep `--output-dir` outside the repository. An existing file is never
+  overwritten, and a failed run leaves no partial file.
+
+Troubleshooting:
+
+- `interactive security challenge`: Wealthsimple showed a screen other than the
+  login form, passkey prompt, or authenticator prompt (for example an SMS or
+  CAPTCHA step). Log in once by hand in BrowserOS neo, then rerun.
+- `rejected the TOTP code twice`: check `WS_TOTP_SECRET` and the Mac's clock.
+- `Reached 200 Load more clicks`: `--since` is further back than the account's
+  history goes in 10,000 rows; pick a later date.
+- `page changed`: Wealthsimple changed the login or activity page; update the
+  bridge in `scripts/wealthsimple_browseros_bridge.py` before retrying.
+
 
 ## LLM transaction categorization
 
@@ -355,11 +403,3 @@ versions change. Unenriched and enriched approvals never authorize each other.
 
 The automated test suite makes no network requests; it drives fake
 categorizers only.
-
-## custom packages
-
-- Custom version of <https://github.com/ImranR98/Wealthsimpleton>, modified to
-  be a pip-installable package.
-- `uv` resolves `wealthsimpleton` from the local `../Wealthsimpleton` checkout,
-  behind the `wealthsimple` extra. It is absent from CI and from any fresh
-  clone, which is why every command here passes `--frozen`.
