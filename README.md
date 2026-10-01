@@ -20,10 +20,8 @@ uv run pre-commit install
 cp env-sample .env    # then fill it in
 ```
 
-`--frozen` is load-bearing. `uv.lock` carries a `../Wealthsimpleton` path
-source that exists on a developer machine and on no CI runner, so re-resolving
-dies with `Distribution not found at: file:///.../Wealthsimpleton`. Plain
-`uv run` re-resolves and hits it.
+`--frozen` installs exactly what `uv.lock` pins without re-resolving, so a
+local run matches CI.
 
 ## tests and lint
 
@@ -61,9 +59,6 @@ downloader (see [downloading Wealthsimple transactions](#downloading-wealthsimpl
 uv run --frozen python load-transactions.py --type ws_debit --filepath ws-debit.csv --database finance
 uv run --frozen python load-transactions.py --type ws_credit --filepath ws-credit.csv --database finance
 ```
-
-The `wealthsimple` extra still pulls the sibling `../Wealthsimpleton`
-checkout, but no code imports it any more.
 
 Load pre-categorized Excel transactions:
 
@@ -408,11 +403,3 @@ versions change. Unenriched and enriched approvals never authorize each other.
 
 The automated test suite makes no network requests; it drives fake
 categorizers only.
-
-## custom packages
-
-- Custom version of <https://github.com/ImranR98/Wealthsimpleton>, modified to
-  be a pip-installable package.
-- `uv` resolves `wealthsimpleton` from the local `../Wealthsimpleton` checkout,
-  behind the `wealthsimple` extra. It is absent from CI and from any fresh
-  clone, which is why every command here passes `--frozen`.

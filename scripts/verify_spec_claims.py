@@ -549,9 +549,9 @@ def repo() -> None:
         'requires-python = ">=3.12" IS absent',
     )
     check(
-        '"../Wealthsimpleton"' in pp,
-        "R8 pyproject has the ../Wealthsimpleton path source",
-        '"../Wealthsimpleton" IS absent',
+        '"../Wealthsimpleton"' not in pp,
+        "R8 pyproject has no ../Wealthsimpleton path source",
+        '"../Wealthsimpleton" IS present',
     )
 
 
