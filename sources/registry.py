@@ -78,13 +78,13 @@ CARD_TYPES = {
     "ws_debit": {
         "module": "sources.api.wealthsimple_debit",
         "class_name": "WealthsimpleDebitStatement",
-        "requires_file": False,
+        "requires_file": True,
         "description": "Wealthsimple Debit",
     },
     "ws_credit": {
         "module": "sources.api.wealthsimple_credit",
         "class_name": "WealthsimpleCreditStatement",
-        "requires_file": False,
+        "requires_file": True,
         "description": "Wealthsimple Credit",
     },
 }

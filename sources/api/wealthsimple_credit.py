@@ -1,45 +1,49 @@
 import polars as pl
-from wealthsimpleton import wealthsimpleton as ws
 
-from sources.base import OnlineCardStatement
+from sources.base import FileBasedCardStatement
 
 
-class WealthsimpleCreditStatement(OnlineCardStatement):
+class WealthsimpleCreditStatement(FileBasedCardStatement):
     purchase = "Purchase"
     refund = "Refund"
     acceptable_types = [purchase, refund]
 
-    def __init__(self):
-        super().__init__(type="ws_credit")
+    def __init__(self, file_path: str):
+        super().__init__(type="ws_credit", file_path=file_path)
 
     def load_data(self) -> None:
         """
-        Load and process Wealthsimple credit card transaction data using the wealthsimpleton API.
+        Load Wealthsimple credit card activity scraped by
+        scripts/download_wealthsimple_transactions.py.
 
-        This function retrieves credit card transaction data from Wealthsimple using the
-        wealthsimpleton library, filters for purchase transactions, and transforms the data
+        Filters for purchase and refund transactions and transforms the data
         into a standardized format for database insertion.
 
         The function performs the following transformations:
-        1. Fetches transactions using wealthsimpleton.get_transactions()
+        1. Reads the scraped CSV (description, type, amount, date)
         2. Filters to only include "Purchase" type transactions
         3. Renames columns to standardized names (description -> merchant, amount -> cost)
         4. Adds a placeholder cc_category column
-        5. Converts date strings from ISO format to date objects
+        5. Converts YYYY-MM-DD date strings to date objects
         6. Parses cost strings (removes currency symbols) and converts to float
 
         Returns:
             None: Sets self.df with the processed DataFrame
 
         Raises:
-            Any exceptions from the wealthsimpleton library or data processing
+            Any exceptions from reading or processing the CSV
         """
         print("================================================")
         print("load data start from wealthsimple_credit.py")
-        transactions: list[dict] = ws.get_transactions(
-            account_activity_url_suffix=self.config.ws_credit_link
+        df = pl.read_csv(
+            self.file_path,
+            schema={
+                "description": pl.Utf8,
+                "type": pl.Utf8,
+                "amount": pl.Utf8,
+                "date": pl.Utf8,
+            },
         )
-        df = pl.DataFrame(transactions)
         df1 = df.filter(pl.col("type").is_in(self.acceptable_types))
 
         # merge description & type
@@ -57,7 +61,7 @@ class WealthsimpleCreditStatement(OnlineCardStatement):
         )
 
         # Convert date strings to date objects
-        df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y-%m-%dT%H:%M:%S"))
+        df4 = df3.with_columns(pl.col("date").str.to_date(format="%Y-%m-%d"))
 
         # parse float values from after the $ sign
         df5 = df4.with_columns(
