@@ -314,6 +314,24 @@ class TestResearchCliRun(ResearchCliTestCase):
         self.assertEqual(self.client.search_calls, [])
         self.assertEqual(self.stored_packets(), [])
 
+    def test_e_transfer_rows_are_named_held_and_never_researched(self):
+        # V45: held rows are listed by name so the run can ask the user.
+        self.patch(
+            research_cli,
+            "load_rows",
+            lambda c, f: rows_for(
+                "Interac e-Transfer: Beryl Tong", "Interac e-Transfer: Eddie Tsao"
+            ),
+        )
+        code, output = self.research()
+        self.assertEqual(code, 0)
+        self.assertIn("Held for manual categorization (2), never researched:", output)
+        self.assertIn("interac e-transfer: beryl tong", output)
+        self.assertIn("interac e-transfer: eddie tsao", output)
+        self.assertIn("Nothing to research", output)
+        self.assertEqual(self.client.search_calls, [])
+        self.assertEqual(self.stored_packets(), [])
+
     def test_successful_research_exits_zero_and_stores_a_pending_packet(self):
         code, output = self.research()
         self.assertEqual(code, 0)

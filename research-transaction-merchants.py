@@ -38,8 +38,8 @@ from services.research_packets import (
 )
 from services.research_runner import (
     ResearchRunSummary,
-    discover_targets,
     run_targets,
+    split_targets,
     summarize,
 )
 from services.tinyfish_research import (
@@ -228,13 +228,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     choices = database.get_categorization_choices()
 
     # Read-only discovery: rows the deterministic resolver cannot place (V4).
-    targets = discover_targets(
+    targets, manual = split_targets(
         rows,
         card_type=args.type,
         choices=choices,
         auto_match=database.get_auto_match_category,
     )
     print(f"Discovered {len(targets)} distinct unresolved merchant(s)")
+    if manual:
+        print(f"Held for manual categorization ({len(manual)}), never researched:")
+        for merchant in manual:
+            print(f"  - {merchant}")
 
     if not targets:
         summary = summarize(())
