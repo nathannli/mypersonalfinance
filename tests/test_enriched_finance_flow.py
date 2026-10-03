@@ -427,5 +427,47 @@ class TestNoTinyFishInTheLoadPath(unittest.TestCase):
         )
 
 
+class TestManualEtransfers(EnrichedFlowTestCase):
+    def test_cached_approved_packet_cannot_send_transfer_to_llm(self):
+        categorizer = FakeEnrichedCategorizer(select_decision())
+        outcome = self.insert(categorizer, merchant="Interac e-Transfer: Example")
+        self.assertEqual(outcome.reason, UnresolvedReason.MANUAL_CONTEXT_REQUIRED)
+        self.assertEqual(categorizer.calls, [])
+        self.assertEqual(self.db.resolved_merchants, [])
+        self.assertEqual(self.db.insert_calls, [])
+
+    def test_user_choices_are_per_transaction_and_never_learned(self):
+        for day, choice_id in [(15, 11), (16, 36)]:
+            outcome = self.db.insert_manual_etransfer(
+                date(2026, 9, day), "Interac e-Transfer: Example", 20.0, choice_id
+            )
+            self.assertEqual(outcome.status, TransactionStatus.INSERTED)
+            self.assertEqual(outcome.resolution, Resolution.MANUAL)
+        self.assertEqual([args[-1] for _, args in self.db.insert_calls], [11, 36])
+        self.assertEqual(self.db.auto_match_insert_calls, [])
+        self.assertEqual(self.db.resolved_merchants, [])
+
+    def test_repeat_answer_is_duplicate(self):
+        self.db.exact_duplicate = True
+        outcome = self.db.insert_manual_etransfer(
+            self.transaction_date, "Interac e-Transfer: Example", 20.0, 11
+        )
+        self.assertEqual(outcome.status, TransactionStatus.DUPLICATE)
+        self.assertEqual(self.db.insert_calls, [])
+
+    def test_bad_choice_or_non_transfer_never_writes(self):
+        for merchant, choice_id in [
+            ("Interac e-Transfer: Example", 999),
+            ("Interac e-Transfer: Example", True),
+            ("OPENAI", 11),
+        ]:
+            with self.subTest(merchant=merchant, choice_id=choice_id):
+                with self.assertRaises(ValueError):
+                    self.db.insert_manual_etransfer(
+                        self.transaction_date, merchant, 20.0, choice_id
+                    )
+        self.assertEqual(self.db.insert_calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
