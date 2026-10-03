@@ -239,6 +239,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Held for manual categorization ({len(manual)}), never researched:")
         for merchant in manual:
             print(f"  - {merchant}")
+        print(
+            "Categorize each transfer with: python categorize-etransfers.py "
+            "(same --type and statement inputs)"
+        )
 
     if not targets:
         summary = summarize(())

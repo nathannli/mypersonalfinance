@@ -17,6 +17,10 @@ from services.deterministic_categorization import (
     DeterministicOutcome,
     resolve_deterministic_choice,
 )
+from services.manual_etransfers import (
+    MANUAL_CONTEXT_PREFIXES as MANUAL_CONTEXT_PREFIXES,
+    needs_manual_context,
+)
 from services.research_packets import (
     MAX_FETCH_URLS,
     FetchedPage,
@@ -49,18 +53,6 @@ from services.transaction_categorization import (
     UnresolvedReason,
     normalize_context_text,
 )
-
-# Merchant prefixes whose reason lives with the account holder, not on the web.
-# An Interac e-Transfer names who was paid and never why, so research can only
-# return the provider's own help pages. These rows are held for the user.
-MANUAL_CONTEXT_PREFIXES: tuple[str, ...] = ("interac e-transfer:",)
-
-
-def needs_manual_context(normalized_merchant: str) -> bool:
-    """True when only the account holder can say what this transfer was for."""
-
-    return normalized_merchant.startswith(MANUAL_CONTEXT_PREFIXES)
-
 
 # Sentinels used only in this module's reporting, never as packet contents.
 STATE_REASONS: frozenset[UnresolvedReason] = frozenset(
