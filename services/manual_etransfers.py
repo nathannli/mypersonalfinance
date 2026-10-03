@@ -68,5 +68,7 @@ def statement_transfers(
         )
         transfers.setdefault(transfer.transaction_id, transfer)
     return tuple(
-        sorted(transfers.values(), key=lambda item: (item.date, item.merchant, item.cost))
+        sorted(
+            transfers.values(), key=lambda item: (item.date, item.merchant, item.cost)
+        )
     )

@@ -158,7 +158,8 @@ class MyFinanceDB(FinanceDB):
             raise ValueError("subcategory_id must be an integer")
         choice = next(
             (
-                row for row in self.get_categorization_choices()
+                row
+                for row in self.get_categorization_choices()
                 if row["subcategory_id"] == subcategory_id
             ),
             None,

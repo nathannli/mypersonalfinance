@@ -14,13 +14,25 @@ from services.manual_etransfers import statement_transfers
 from services.transaction_categorization import TransactionOutcome, TransactionStatus
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("manual_transfer_cli", ROOT / "categorize-etransfers.py")
+spec = importlib.util.spec_from_file_location(
+    "manual_transfer_cli", ROOT / "categorize-etransfers.py"
+)
 cli = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cli)
 
 CHOICES = [
-    {"category_id": 1, "subcategory_id": 11, "category_name": "Food", "subcategory_name": "Grocery"},
-    {"category_id": 2, "subcategory_id": 22, "category_name": "Home", "subcategory_name": "Rent"},
+    {
+        "category_id": 1,
+        "subcategory_id": 11,
+        "category_name": "Food",
+        "subcategory_name": "Grocery",
+    },
+    {
+        "category_id": 2,
+        "subcategory_id": 22,
+        "category_name": "Home",
+        "subcategory_name": "Rent",
+    },
 ]
 
 
@@ -51,12 +63,16 @@ class FakeDatabase:
 
 class TestStatementTransfers(unittest.TestCase):
     def test_same_recipient_keeps_distinct_dates_and_amounts(self):
-        transfers = statement_transfers([row(), row(), row(2), row(cost=30), row(merchant="SHOP")])
+        transfers = statement_transfers(
+            [row(), row(), row(2), row(cost=30), row(merchant="SHOP")]
+        )
         self.assertEqual(len(transfers), 3)
         self.assertEqual(len({item.transaction_id for item in transfers}), 3)
 
     def test_normalized_prefix_and_incoming_amount(self):
-        transfer, = statement_transfers([row(merchant="INTERAC  E-TRANSFER: Example", cost=-20)])
+        (transfer,) = statement_transfers(
+            [row(merchant="INTERAC  E-TRANSFER: Example", cost=-20)]
+        )
         self.assertEqual(transfer.as_dict()["cost"], "-20.00")
 
     def test_invalid_money_and_date_fail(self):
@@ -96,7 +112,9 @@ class TestManualTransferCLI(unittest.TestCase):
     def test_agent_saves_only_named_transaction_then_can_resume(self):
         transaction_id = self.transfers[0].transaction_id
         for expected in ["inserted", "duplicate"]:
-            code, output = self.run_cli(["--transaction", transaction_id, "--subcategory", "22"])
+            code, output = self.run_cli(
+                ["--transaction", transaction_id, "--subcategory", "22"]
+            )
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(output)["status"], expected)
         self.assertEqual(len(self.db.saved), 1)
@@ -104,9 +122,14 @@ class TestManualTransferCLI(unittest.TestCase):
         self.assertEqual(len(json.loads(output)["transactions"]), 1)
 
     def test_unknown_transaction_or_choice_never_writes(self):
-        for transaction_id, choice in [("bad", "11"), (self.transfers[0].transaction_id, "999")]:
+        for transaction_id, choice in [
+            ("bad", "11"),
+            (self.transfers[0].transaction_id, "999"),
+        ]:
             with self.subTest(transaction_id=transaction_id, choice=choice):
-                code, _ = self.run_cli(["--transaction", transaction_id, "--subcategory", choice])
+                code, _ = self.run_cli(
+                    ["--transaction", transaction_id, "--subcategory", choice]
+                )
                 self.assertEqual(code, 1)
         self.assertEqual(self.db.saved, [])
 

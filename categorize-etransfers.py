@@ -16,7 +16,9 @@ from sources.registry import get_file_based_card_types
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--type", choices=sorted(get_file_based_card_types()), default="ws_debit")
+    parser.add_argument(
+        "--type", choices=sorted(get_file_based_card_types()), default="ws_debit"
+    )
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--filepath")
     inputs.add_argument("--folder")
@@ -59,7 +61,9 @@ def interactive(transfers, choices, database) -> None:
             try:
                 answer = input("Subcategory ID to save [s=skip, q=quit]: ").strip()
             except (EOFError, KeyboardInterrupt):
-                print("\nStopped. Earlier choices saved; remaining transfers stay pending.")
+                print(
+                    "\nStopped. Earlier choices saved; remaining transfers stay pending."
+                )
                 return
             if answer.lower() == "q":
                 print("Stopped. Remaining transfers stay pending.")
@@ -108,20 +112,30 @@ def main(argv=None) -> int:
             outcome = database.insert_manual_etransfer(
                 transfer.date, transfer.merchant, transfer.cost, args.subcategory
             )
-            print(json.dumps({
-                "transaction_id": transfer.transaction_id,
-                "status": outcome.status.value,
-            }))
+            print(
+                json.dumps(
+                    {
+                        "transaction_id": transfer.transaction_id,
+                        "status": outcome.status.value,
+                    }
+                )
+            )
             return 0
         pending = tuple(
-            item for item in transfers
+            item
+            for item in transfers
             if not database.check_if_expense_exists(item.date, item.merchant, item.cost)
         )
         if args.list:
-            print(json.dumps({
-                "transactions": [item.as_dict() for item in pending],
-                "choices": choices,
-            }, ensure_ascii=False))
+            print(
+                json.dumps(
+                    {
+                        "transactions": [item.as_dict() for item in pending],
+                        "choices": choices,
+                    },
+                    ensure_ascii=False,
+                )
+            )
         elif not pending:
             print("No pending e-transfers.")
         else:
