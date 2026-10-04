@@ -24,6 +24,7 @@ from services.llm_categorizer import (
     EnrichedSuggestion,
     OpenCodexCategorizer,
 )
+from services.manual_etransfers import needs_manual_context
 from services.research_packets import (
     CategorySuggestion,
     ResearchPacket,
@@ -36,6 +37,7 @@ from services.transaction_categorization import (
     TransactionStatus,
     UnresolvedReason,
     build_canonical_context,
+    normalize_context_text,
 )
 
 
@@ -142,6 +144,32 @@ class MyFinanceDB(FinanceDB):
         self.insert(query, (date, merchant, cost, category_id, subcategory_id))
         return TransactionOutcome(TransactionStatus.INSERTED, resolution)
 
+    def insert_manual_etransfer(
+        self,
+        date: date,
+        merchant: str,
+        cost: float,
+        subcategory_id: int,
+    ) -> TransactionOutcome:
+        """Save the user's choice for this transfer, without learning a merchant rule."""
+        if not needs_manual_context(normalize_context_text(merchant)):
+            raise ValueError("Manual e-transfer categorization requires an e-transfer")
+        if isinstance(subcategory_id, bool) or not isinstance(subcategory_id, int):
+            raise ValueError("subcategory_id must be an integer")
+        choice = next(
+            (
+                row
+                for row in self.get_categorization_choices()
+                if row["subcategory_id"] == subcategory_id
+            ),
+            None,
+        )
+        if choice is None:
+            raise ValueError(f"Unknown subcategory_id: {subcategory_id}")
+        if self.check_if_expense_exists(date, merchant, cost):
+            return TransactionOutcome(TransactionStatus.DUPLICATE, Resolution.MANUAL)
+        return self._insert_choice(date, merchant, cost, choice, Resolution.MANUAL)
+
     def insert_expense(
         self,
         date: date,
@@ -178,6 +206,12 @@ class MyFinanceDB(FinanceDB):
             assert deterministic.choice is not None
             return self._insert_choice(
                 date, merchant, cost, deterministic.choice, Resolution.DETERMINISTIC
+            )
+
+        if needs_manual_context(normalize_context_text(merchant)):
+            return TransactionOutcome(
+                TransactionStatus.UNRESOLVED,
+                reason=UnresolvedReason.MANUAL_CONTEXT_REQUIRED,
             )
 
         try:

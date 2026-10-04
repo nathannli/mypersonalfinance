@@ -23,6 +23,47 @@ cp env-sample .env    # then fill it in
 `--frozen` installs exactly what `uv.lock` pins without re-resolving, so a
 local run matches CI.
 
+## categorizing e-transfers
+
+Categorize pending Interac e-transfers from downloaded statements, one transaction
+at a time. Choose an existing category/subcategory for each transfer; the same
+recipient can have different purposes. Each answer saves that expense immediately.
+Already loaded expenses are skipped. Merchant auto-match rules stay unchanged.
+
+```sh
+uv run --frozen python categorize-etransfers.py --filepath ~/Downloads/ws-debit.csv
+# Or use --folder ~/Downloads/wealthsimple/ for overlapping exports.
+```
+
+The default statement type is `ws_debit`; `--type` selects another existing loader.
+Normal statement filters still apply. Enter the displayed subcategory ID to save,
+`s` to skip, or `q` to quit. Rerunning resumes with transfers still pending.
+Regular loading reports unmatched e-transfers as `manual_context_required`, with
+no research-packet lookup or LLM call.
+
+For an agent, ask: “Categorize my e-transfers from this statement; ask me what
+each transaction was for.” The agent should run the read-only queue command:
+
+```sh
+uv run --frozen python categorize-etransfers.py --filepath ~/Downloads/ws-debit.csv --list
+```
+
+Its JSON contains `transactions` (ID, date, merchant, signed cost) and live
+`choices` (category/subcategory names and IDs). Ask the user about each transaction,
+showing its date, recipient, and amount. Map only their explicit answer to a listed
+subcategory; clarify ambiguous answers. Never infer purpose from a recipient or
+research the transfer. Save each answered transaction with:
+
+```sh
+uv run --frozen python categorize-etransfers.py --filepath ~/Downloads/ws-debit.csv \
+  --transaction <transaction_id> --subcategory <subcategory_id>
+```
+
+Use the same input arguments throughout. Unanswered transactions stay pending;
+repeat `--list` to resume. Reapplying a saved answer reports `duplicate` without
+changing its category. This workflow inserts pending expenses; it does not edit
+already loaded transactions or create taxonomy entries.
+
 ## tests and lint
 
 ```sh

@@ -22,6 +22,7 @@ class TransactionStatus(StrEnum):
 
 class Resolution(StrEnum):
     DETERMINISTIC = "deterministic"
+    MANUAL = "manual"
     LLM = "llm"
     NONE = "none"
 
@@ -33,6 +34,7 @@ class UnresolvedReason(StrEnum):
     MALFORMED = "malformed"
     INVALID_CHOICE = "invalid_choice"
     INVALID_CONTEXT = "invalid_context"
+    MANUAL_CONTEXT_REQUIRED = "manual_context_required"
     CIRCUIT_OPEN = "circuit_open"
     # Research (web enrichment) reasons. The first block is produced while
     # researching a merchant; the second block is a load-time or review-time

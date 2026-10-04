@@ -29,6 +29,7 @@ from services.research_runner import (
     discover_targets,
     run_target,
     run_targets,
+    split_targets,
     summarize,
 )
 from services.tinyfish_research import (
@@ -236,6 +237,42 @@ class TestDiscovery(RunnerTestCase):
             card_type="rogers",
         )
         self.assertEqual(found, ())
+
+    def split(self, rows, *, auto_match=None):
+        return split_targets(
+            rows,
+            card_type="amex",
+            choices=CHOICES,
+            auto_match=auto_match or (lambda merchant: None),
+        )
+
+    def test_e_transfer_rows_are_held_for_manual_categorization(self):
+        # V45: the transfer names who was paid, never why, so research can only
+        # return the provider's own help pages.
+        targets, manual = self.split(
+            [
+                {"merchant": "Interac e-Transfer: Beryl Tong", "cc_category": None},
+                {"merchant": "INTERAC  E-TRANSFER: beryl tong", "cc_category": None},
+                {"merchant": "Acme Widgets", "cc_category": None},
+            ]
+        )
+        self.assertEqual([t.normalized_merchant for t in targets], ["acme widgets"])
+        self.assertEqual(manual, ("interac e-transfer: beryl tong",))
+
+    def test_held_rows_never_become_targets(self):
+        found = self.discover(
+            [{"merchant": "Interac e-Transfer: Eddie Tsao", "cc_category": None}]
+        )
+        self.assertEqual(found, ())
+
+    def test_a_resolved_e_transfer_is_not_reported_as_held(self):
+        # An auto-match row answers it, so there is nothing to ask the user.
+        targets, manual = self.split(
+            [{"merchant": "Interac e-Transfer: Beryl Tong", "cc_category": None}],
+            auto_match=lambda merchant: ("Food", "Grocery"),
+        )
+        self.assertEqual(targets, ())
+        self.assertEqual(manual, ())
 
 
 class TestRunStatus(RunnerTestCase):

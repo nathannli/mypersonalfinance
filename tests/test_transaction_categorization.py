@@ -59,6 +59,7 @@ class TestTransactionCategorization(unittest.TestCase):
                 "malformed",
                 "invalid_choice",
                 "invalid_context",
+                "manual_context_required",
                 "circuit_open",
                 "research_auth",
                 "research_rate_limit",

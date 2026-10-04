@@ -17,6 +17,10 @@ from services.deterministic_categorization import (
     DeterministicOutcome,
     resolve_deterministic_choice,
 )
+from services.manual_etransfers import (
+    MANUAL_CONTEXT_PREFIXES as MANUAL_CONTEXT_PREFIXES,
+    needs_manual_context,
+)
 from services.research_packets import (
     MAX_FETCH_URLS,
     FetchedPage,
@@ -139,23 +143,27 @@ class ResearchRunSummary:
         return 1 if self.status is ResearchRunStatus.FAILED else 0
 
 
-def discover_targets(
+def split_targets(
     rows: Iterable[Mapping[str, object]],
     *,
     card_type: str,
     choices: Sequence[Mapping[str, object]],
     auto_match: Callable[[str], tuple[str, str] | None],
-) -> tuple[ResearchTarget, ...]:
-    """The deduplicated merchants this run should research (V2, V4).
+) -> tuple[tuple[ResearchTarget, ...], tuple[str, ...]]:
+    """``(research targets, held-for-manual merchants)`` (V2, V4, V45).
 
     A row is a target only when the deterministic resolver reports no mapping
     at all. ``MATCHED`` rows are already known, and ``INVALID_MAPPING`` rows are
     deliberately excluded: a mapping exists that the live taxonomy cannot
     honour, so researching the merchant would paper over a data bug that needs
     a human.
+
+    ``MANUAL_CONTEXT_PREFIXES`` rows are returned separately and never become
+    targets: their reason is not on the web, so the caller must ask the user.
     """
 
     seen: dict[str, ResearchTarget] = {}
+    manual: dict[str, None] = {}
     for row in rows:
         merchant = row.get("merchant")
         if not isinstance(merchant, str) or not merchant.strip():
@@ -169,10 +177,29 @@ def discover_targets(
         if resolution.outcome is not DeterministicOutcome.NO_MATCH:
             continue
         normalized = normalize_context_text(merchant)
-        if not normalized or normalized in seen:
+        if not normalized:
+            continue
+        if needs_manual_context(normalized):
+            manual.setdefault(normalized, None)
+            continue
+        if normalized in seen:
             continue
         seen[normalized] = ResearchTarget(normalized, merchant)
-    return tuple(seen.values())
+    return tuple(seen.values()), tuple(manual)
+
+
+def discover_targets(
+    rows: Iterable[Mapping[str, object]],
+    *,
+    card_type: str,
+    choices: Sequence[Mapping[str, object]],
+    auto_match: Callable[[str], tuple[str, str] | None],
+) -> tuple[ResearchTarget, ...]:
+    """The deduplicated merchants this run should research (V2, V4, V45)."""
+
+    return split_targets(
+        rows, card_type=card_type, choices=choices, auto_match=auto_match
+    )[0]
 
 
 def review_status_for(
