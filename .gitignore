@@ -8,6 +8,7 @@ amex-downloads/
 playwright-report/
 test-results/
 trace.zip
+graphify-out
 
 *.pyc
 *.pyo
