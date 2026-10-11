@@ -5,11 +5,11 @@ import argparse
 import asyncio
 import logging
 import os
-import shlex
 from datetime import date
 from pathlib import Path
 
 from config import Config
+from scripts.browser_common import loader_command, validate_download
 from scripts.wealthsimple_browseros_bridge import run_scrape, write_csv
 
 ACCOUNTS = {"debit": "ws_debit", "credit": "ws_credit"}
@@ -61,35 +61,6 @@ def destination(output_dir: Path, account: str, since: date) -> Path:
     return output_dir.expanduser().resolve() / name
 
 
-def validate_download(path: Path, account: str) -> None:
-    from sources.registry import get_card_class
-
-    columns = get_card_class(ACCOUNTS[account])(str(path)).get_df().columns
-    expected = ["date", "merchant", "cost", "cc_category"]
-    if columns != expected:
-        raise RuntimeError(
-            f"Downloaded Wealthsimple file has unsupported standardized columns: {columns}"
-        )
-
-
-def loader_command(path: Path, account: str, database: str) -> str:
-    return shlex.join(
-        [
-            "uv",
-            "run",
-            "--frozen",
-            "python",
-            "load-transactions.py",
-            "--type",
-            ACCOUNTS[account],
-            "--filepath",
-            str(path),
-            "--database",
-            database,
-        ]
-    )
-
-
 def run(output_dir: Path, database: str, account: str, since: date) -> Path:
     config = Config()
     link = account_link(config, account)
@@ -101,12 +72,12 @@ def run(output_dir: Path, database: str, account: str, since: date) -> Path:
     rows = asyncio.run(run_scrape(link, since, email, password, totp_secret))
     saved = write_csv(rows, target)
     try:
-        validate_download(saved, account)
+        validate_download(saved, ACCOUNTS[account])
     except Exception:
         saved.unlink(missing_ok=True)
         raise
     logger.info("Downloaded %d Wealthsimple rows: %s", len(rows), saved)
-    logger.info("Load manually: %s", loader_command(saved, account, database))
+    logger.info("Load manually: %s", loader_command(saved, database, ACCOUNTS[account]))
     return saved
 
 

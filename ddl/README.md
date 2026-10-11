@@ -133,7 +133,7 @@ the live databases — column and constraint parity, sequence positions, row ids
 and which rows are absent from the tracked files:
 
 ```sh
-uv run --frozen python scripts/verify_spec_claims.py
+uv run --frozen python -m scripts.verify_spec_claims
 ```
 
 It needs a live connection and `gh`, so it is not part of the unit suite and

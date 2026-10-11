@@ -230,7 +230,9 @@ def download_path(response: Any) -> Path:
                 path = Path(value)
                 break
     if path is None:
-        match = re.search(r"(/[\w./ -]+\.(?:csv|CSV))\b", response_text(response))
+        # BrowserOS reports the save location in prose and appends " (n)" when
+        # the browser's own download directory already holds that name.
+        match = re.search(r"(/[\w./ ()-]+\.(?:csv|CSV))\b", response_text(response))
         if match is None:
             raise RuntimeError("BrowserOS did not return a downloaded CSV path")
         path = Path(match.group(1))

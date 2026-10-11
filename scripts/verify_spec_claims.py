@@ -1,4 +1,5 @@
-"""Verify every live-schema claim in SPEC.md, each labelled with its database.
+"""Verify every live-schema claim about the two databases, labelled with its
+database.
 
 The spec asserted four things that live disagrees with, and a fifth shape it
 never described at all. Every one of them was a claim no check covered. This
@@ -6,12 +7,24 @@ script exists so that cannot recur: every claim names the database it is
 checked against, and a claim about `finance` is never answered from a
 `parents_finance` connection.
 
+The claims were written to check the pipeline spec against live; that spec was
+deleted in `267ee00`, so this script is now their record. The current SPEC.md
+is the Simplii downloader spec and carries no such claims.
+
+The `finance` row counts are dated floors, not exact numbers: rules and
+expenses only grow, so an exact count failed on the first load after its
+baseline (8a2d8a9). A count below its baseline still fails, which is the
+wipe case worth catching.
+
 The `detail` of every check carries the *observed* value. An earlier version
 hardcoded the detail, so 77 passes printed the word "absent" beside them and
 the run was green and uninformative. A check reporting a constant is a check
 with no output.
 
-Run from the repo root:  uv run --frozen python scripts/verify_spec_claims.py
+Run from the repo root:  uv run --frozen python -m scripts.verify_spec_claims
+
+The module form is required: run by path and `scripts/` rather than the repo
+root lands on sys.path, so the `config` import fails.
 """
 
 import pathlib
@@ -169,7 +182,14 @@ def finance() -> None:
     )
 
     n_m = scalar(db, "select count(*) from merchant_name_auto_match")
-    check(n_m == 164, "F6 finance.merchant_name_auto_match = 164", f"got {n_m}")
+    # Rules only grow: a floor keeps the wipe tripwire without failing on every
+    # later categorization session, the treatment F5's expenses count already
+    # got in 8a2d8a9. The baseline is the same 2026-09-27 DDL rebuild snapshot.
+    check(
+        n_m >= 164,
+        "F6 finance.merchant_name_auto_match >= 164 (2026-09-27 baseline)",
+        f"got {n_m}",
+    )
     check(
         uniques(db, "merchant_name_auto_match") == ["(merchant_name)"],
         "F6b finance.merchant_name_auto_match UNIQUE is 1-column (T9)",
@@ -177,7 +197,12 @@ def finance() -> None:
     )
 
     n_s = scalar(db, "select count(*) from substring_auto_match")
-    check(n_s == 100, "F7 finance.substring_auto_match = 100", f"got {n_s}")
+    # Floor, not exact: rules grow, and 8a2d8a9 made the same change for F5.
+    check(
+        n_s >= 100,
+        "F7 finance.substring_auto_match >= 100 (2026-09-27 baseline)",
+        f"got {n_s}",
+    )
     su = uniques(db, "substring_auto_match")
     check(
         su == ['("substring", merchant_category, merchant_subcategory)'],

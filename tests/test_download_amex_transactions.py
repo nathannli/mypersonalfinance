@@ -87,11 +87,11 @@ class TestDownloadAmexTransactions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "activity export.csv"
 
-            command = loader_command(path, "finance")
+            command = loader_command(path, "finance", "amex")
 
             self.assertEqual(
                 command,
-                "uv run python load-transactions.py --type amex --filepath "
+                "uv run --frozen python load-transactions.py --type amex --filepath "
                 f"'{path}' --database finance",
             )
 
