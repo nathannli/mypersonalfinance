@@ -20,8 +20,9 @@ uv run pre-commit install
 cp env-sample .env    # then fill it in
 ```
 
-`--frozen` installs exactly what `uv.lock` pins without re-resolving, so a
-local run matches CI.
+`--frozen` installs exactly what `uv.lock` pins without re-resolving. CI runs
+`uv sync --locked` and `uv run --locked`, which additionally fail if `uv.lock`
+has drifted from `pyproject.toml` instead of re-resolving it.
 
 ## categorizing e-transfers
 
@@ -120,8 +121,8 @@ live, because this repository is public and those rows name real merchants.
 the export command, and the rebuild recipe. The short version:
 
 ```sh
-uv run --frozen python scripts/export_ddl_seed.py --database finance
-uv run --frozen python scripts/verify_spec_claims.py   # checks ddl/ against live
+uv run --frozen python -m scripts.export_ddl_seed --database finance
+uv run --frozen python -m scripts.verify_spec_claims   # checks ddl/ against live
 ```
 
 `verify_spec_claims.py` needs a live connection and `gh`, so it is not in the
@@ -259,6 +260,81 @@ Troubleshooting:
 - `page changed`: Wealthsimple changed the login or activity page; update the
   bridge in `scripts/wealthsimple_browseros_bridge.py` before retrying.
 
+
+## downloading Simplii transactions
+
+The Simplii downloader signs in to Simplii online banking through BrowserOS neo,
+the same local browser the Amex BrowserOS route uses, and exports account activity
+from the bank's *Download Transactions* page. It reads `SIMPLII_USER` (the card
+number) and `SIMPLII_PASSWORD` from the repository `.env`, plus an optional
+`SIMPLII_ACCOUNT` (the wanted account's last four digits) when several accounts of
+that type match. A new BrowserOS tab starts signed out even when another tab is
+already signed in, so every run signs in.
+
+```sh
+uv run --frozen python -m scripts.download_simplii_transactions \
+  --output-dir ~/Downloads/simplii \
+  --database finance \
+  --account debit \
+  --since 2026-09-01
+```
+
+`--account` is `visa` (the Cash Back Visa card) or `debit` (chequing). `--since` is
+the oldest transaction date to keep and `--until` defaults to today; both are
+applied in the export form, which offers an explicit From/To date range. The
+downloader selects the account, chooses `All within date range` and
+`Spreadsheet (CSV)`, triggers the export, moves the file into `--output-dir`,
+validates it through the `simplii_visa` or `simplii_debit` parser, and prints the
+exact `load-transactions.py` command. It never connects to PostgreSQL or runs the
+loader.
+
+That form is the only CSV route: the account detail and Transaction History pages
+have no export control. `BROWSEROS_DOWNLOAD_DIR` must point at the browser's own
+download directory (usually `~/Downloads`), because BrowserOS saves the export
+there under the bank's fixed name `SIMPLII.csv`; the downloader moves it out and
+refuses to overwrite an existing file.
+
+Security boundaries:
+
+- Credentials come from `.env` only, are never printed or passed as CLI arguments,
+  and are filled only after the page origin is confirmed to be a `simplii.com`
+  host.
+- A CAPTCHA or any other screen the bridge cannot complete unattended ends the run
+  with an actionable error; nothing is bypassed or retried in a loop.
+- Step-up verification (`Verify your identity`) is risk-based. When the offered
+  method is a text message and the machine can read it through `macos-messages`,
+  the run chooses it and enters the code itself. Otherwise it says which methods
+  Simplii is offering and waits, leaving the screen to you; approve the push, take
+  the call, or choose the text message and type the code in that tab, and the
+  download continues by itself. It never requests a code it cannot read, and it
+  gives up when the sign-in timeout closes.
+- Keep `--output-dir` outside the repository, and never commit statement data.
+
+Troubleshooting:
+
+- `requires an interactive security challenge`: Simplii served a CAPTCHA. Sign in
+  by hand in BrowserOS neo, then rerun.
+- `step-up verification`: expected, not an error. Complete the method the run
+  names in the open BrowserOS tab (or pick another one in the dropdown), and the
+  download continues when you are signed in. If nobody completes it within the
+  sign-in timeout the run exits nonzero with what to do next.
+- `lists N debit accounts to download`: more than one account matches the request.
+  Set `SIMPLII_ACCOUNT` to the wanted account's last four digits.
+- `outside its download directory`: `BROWSEROS_DOWNLOAD_DIR` does not match the
+  browser's download folder.
+- `page changed`: Simplii changed the form. Update the verified UI facts block at
+  the top of `scripts/simplii_browseros_bridge.py` before retrying.
+- `did not keep the requested ... selection`: the export form reset mid-run; rerun.
+
+Manual authenticated acceptance test:
+
+1. Run the downloader for `--account debit` into an empty output directory and
+   confirm the printed handoff names the `simplii_debit` type.
+2. Run it again for `--account visa` and confirm the handoff names `simplii_visa`.
+3. Confirm both saved files parse to exactly `date`, `merchant`, `cost`,
+   `cc_category`.
+4. Confirm a later `--since` yields fewer rows than the earlier run's file.
+5. Run the same command again and confirm it refuses to overwrite the file.
 
 ## LLM transaction categorization
 

@@ -140,9 +140,14 @@ class TestDownloader(unittest.TestCase):
                     Path(directory), "finance", "credit", date(2026, 9, 1)
                 )
             self.assertTrue(saved.exists())
-        command = downloader.loader_command(saved, "credit", "finance")
+        command = downloader.loader_command(saved, "finance", "ws_credit")
         self.assertIn(command, "\n".join(logs.output))
-        self.assertIn("--type ws_credit", command)
+        self.assertTrue(
+            command.startswith(
+                "uv run --frozen python load-transactions.py --type ws_credit "
+            ),
+            command,
+        )
         for secret in env.values():
             self.assertNotIn(secret, "\n".join(logs.output))
 

@@ -323,7 +323,7 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
         )
 
     @patch.object(downloader.time, "sleep")
-    @patch.object(downloader.messages, "get_db")
+    @patch("messages.get_db")
     def test_browserbase_reads_recent_amex_sms_code(
         self, get_db: MagicMock, sleep: MagicMock
     ) -> None:
@@ -507,7 +507,7 @@ class TestAmexBrowserWorkflow(unittest.TestCase):
             self.assertTrue(saved.exists())
             self.assertFalse(download.exists())
 
-    @patch.object(downloader.shutil, "copyfileobj", side_effect=OSError("copy failed"))
+    @patch("shutil.copyfileobj", side_effect=OSError("copy failed"))
     def test_failed_download_copy_removes_reserved_destination(
         self, copyfileobj: MagicMock
     ) -> None:

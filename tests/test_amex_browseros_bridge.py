@@ -107,6 +107,24 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
                 ):
                     bridge.download_path({"path": "/tmp/activity.csv"})
 
+    def test_download_path_reads_a_collision_suffixed_path_from_the_report(self):
+        # BrowserOS answers the download tool in prose, and the browser renames
+        # a repeated filename to "NAME (n).csv".
+        with tempfile.TemporaryDirectory() as directory:
+            report = (
+                'Downloaded "SIMPLII (2).csv" (366 bytes) on the machine running '
+                f"this browser, to: {directory}/SIMPLII (2).csv"
+            )
+            with patch.dict(os.environ, {"BROWSEROS_DOWNLOAD_DIR": directory}):
+                self.assertEqual(
+                    bridge.download_path(report),
+                    (Path(directory) / "SIMPLII (2).csv").resolve(),
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError, "outside its download directory"
+                ):
+                    bridge.download_path("Downloaded to: /tmp/SIMPLII (2).csv")
+
     def test_login_fill_uses_fresh_amex_refs(self):
         login_snapshot = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/en-ca/account/login/]
 - textbox \"User ID\" [ref=e10]

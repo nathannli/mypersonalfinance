@@ -9,3 +9,11 @@ AMEX_BROWSER_BACKEND=browseros
 BROWSEROS_MCP_URL=http://127.0.0.1:9010/mcp
 AMEX_USER=your_amex_user_id
 AMEX_PASSWORD=your_amex_password
+SIMPLII_USER=your_simplii_card_number
+SIMPLII_PASSWORD=your_simplii_password
+# Optional: last four digits of the Simplii account to download, needed only
+# when several accounts of the requested type match.
+SIMPLII_ACCOUNT=
+# BrowserOS writes the Simplii export under the bank's fixed name inside the
+# browser's own download directory, so point this at that directory.
+BROWSEROS_DOWNLOAD_DIR=~/Downloads

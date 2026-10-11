@@ -7,8 +7,6 @@ import json
 import logging
 import os
 import re
-import shlex
-import shutil
 import subprocess
 import tempfile
 import time
@@ -18,8 +16,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 from zipfile import BadZipFile, ZipFile
 
-import messages
 from dotenv import load_dotenv
+
+from scripts.browser_common import (
+    loader_command,
+    move_download,
+    sanitize_filename,
+    validate_download,
+    wait_for_sms_code,
+)
 
 load_dotenv()
 
@@ -36,7 +41,6 @@ DRIVER_DAEMON_TIMEOUT = (
 )
 NO_ACTIVE_PAGE_ERROR = f'No active page in session "{BROWSE_SESSION}".'
 ACTIVE_BROWSE_SESSION: str | None = None
-MFA_CODE_PATTERN = re.compile(r"\b(\d{6})\b")
 AMEX_SMS_MARKERS = ("american express", "amex")
 AMEX_BROWSER_BACKENDS = ("browserbase", "browseros")
 
@@ -245,43 +249,13 @@ def select_sms_mfa_browserbase() -> datetime:
 
 
 def wait_for_amex_sms_code(requested_at: datetime) -> str:
-    try:
-        database = messages.get_db()
-    except PermissionError as exc:
-        raise RuntimeError(
-            "macos-messages needs Full Disk Access for this terminal application"
-        ) from exc
-
-    sms_chat_ids = [chat.id for chat in database.chats(service="SMS", limit=100)]
-    if not sms_chat_ids:
-        raise RuntimeError("macos-messages found no SMS conversations")
-
-    logger.info("Waiting 10 seconds before checking Messages for MFA code...")
-    time.sleep(MFA_CODE_INITIAL_DELAY_SECONDS)
-    logger.info("Waiting for recent Amex MFA code in Messages...")
-    deadline = time.monotonic() + MFA_CODE_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        for message in reversed(
-            list(
-                database.messages(
-                    chat_ids=sms_chat_ids,
-                    after=requested_at,
-                    limit=25,
-                    include_unsent=False,
-                    include_unknown_senders=True,
-                )
-            )
-        ):
-            text = message.text or ""
-            if message.is_from_me or not any(
-                marker in text.lower() for marker in AMEX_SMS_MARKERS
-            ):
-                continue
-            if code := MFA_CODE_PATTERN.search(text):
-                logger.info("Received recent Amex MFA code.")
-                return code.group(1)
-        time.sleep(0.5)
-    raise RuntimeError("Timed out waiting for a recent Amex SMS verification code")
+    return wait_for_sms_code(
+        AMEX_SMS_MARKERS,
+        requested_at,
+        source="Amex",
+        initial_delay_seconds=MFA_CODE_INITIAL_DELAY_SECONDS,
+        timeout_seconds=MFA_CODE_TIMEOUT_SECONDS,
+    )
 
 
 def submit_sms_mfa_browserbase(requested_at: datetime) -> None:
@@ -839,14 +813,6 @@ def chrome_download_dir() -> Path:
     return Path(download.get("default_directory") or Path.home() / "Downloads")
 
 
-def sanitize_filename(suggested_filename: str) -> str:
-    filename = Path(suggested_filename).name
-    filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("._")
-    if not filename:
-        raise ValueError("Amex supplied an unusable download filename")
-    return filename
-
-
 def wait_for_download(download_dir: Path, before: set[Path]) -> Path:
     deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -866,57 +832,6 @@ def wait_for_download(download_dir: Path, before: set[Path]) -> Path:
     raise RuntimeError("Timed out waiting for Chrome to finish the Amex CSV download")
 
 
-def move_download(
-    download: Path,
-    output_dir: Path,
-    destination_name: str | None = None,
-    *,
-    delete_source: bool = True,
-) -> Path:
-    output_dir = output_dir.expanduser().resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    destination = output_dir / sanitize_filename(destination_name or download.name)
-    try:
-        with destination.open("xb") as reserved, download.open("rb") as source:
-            shutil.copyfileobj(source, reserved)
-    except FileExistsError:
-        raise FileExistsError(f"Refusing to overwrite existing file: {destination}")
-    except OSError:
-        destination.unlink(missing_ok=True)
-        raise
-    if delete_source:
-        download.unlink()
-    return destination
-
-
-def validate_download(path: Path) -> None:
-    from sources.csv.amex import AmexStatement
-
-    columns = AmexStatement(str(path)).get_df().columns
-    expected = ["date", "merchant", "cost", "cc_category"]
-    if columns != expected:
-        raise RuntimeError(
-            f"Downloaded Amex file has unsupported standardized columns: {columns}"
-        )
-
-
-def loader_command(path: Path, database: str) -> str:
-    return shlex.join(
-        [
-            "uv",
-            "run",
-            "python",
-            "load-transactions.py",
-            "--type",
-            "amex",
-            "--filepath",
-            str(path),
-            "--database",
-            database,
-        ]
-    )
-
-
 def run(
     output_dir: Path,
     database: str,
@@ -929,7 +844,9 @@ def run(
         saved_paths = [Path(path) for path in result["paths"]]
         for saved_path in saved_paths:
             logger.info("Downloaded Amex statement: %s", saved_path)
-            logger.info("Load manually: %s", loader_command(saved_path, database))
+            logger.info(
+                "Load manually: %s", loader_command(saved_path, database, "amex")
+            )
         historic_months = [
             month for month in (statement_months or []) if month != "latest"
         ]
@@ -958,7 +875,9 @@ def run(
                 )
                 validate_download(saved)
                 logger.info("Downloaded Amex statement for %s: %s", month, saved)
-                logger.info("Load manually: %s", loader_command(saved, database))
+                logger.info(
+                    "Load manually: %s", loader_command(saved, database, "amex")
+                )
                 saved_paths.append(saved)
         if download_latest:
             if historic_months:
@@ -977,7 +896,9 @@ def run(
                 saved_path = download_browser(session_id, output_dir)
             validate_download(saved_path)
             logger.info("Downloaded Amex statement: %s", saved_path)
-            logger.info("Load manually: %s", loader_command(saved_path, database))
+            logger.info(
+                "Load manually: %s", loader_command(saved_path, database, "amex")
+            )
             saved_paths.append(saved_path)
         return saved_paths if historic_months else saved_paths[0]
     finally:
