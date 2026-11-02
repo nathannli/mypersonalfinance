@@ -8,7 +8,7 @@ import json
 import re
 import struct
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -48,11 +48,25 @@ CHALLENGE_MARKERS = (
 # Read-only: returns the visible text of the activity list and nothing else.
 # Rows are buttons whose last leaf is an amount; each row belongs to the
 # nearest preceding date heading.
+DISMISS_OVERLAY_SCRIPT = """
+document.dispatchEvent(new KeyboardEvent(
+  'keydown', {key: 'Escape', keyCode: 27, bubbles: true}));
+return 'ok';
+"""
+
+CLICK_LOGIN_SCRIPT = """
+const button = [...document.querySelectorAll('button')].find(
+  (element) => element.textContent.trim() === 'Log in');
+if (!button) throw new Error('Log in button missing');
+button.click();
+return 'ok';
+"""
+
 ROWS_SCRIPT = r"""
 return (() => {
   const main = document.querySelector('main');
   if (!main) return JSON.stringify({rows: [], loadMore: false});
-  const isDate = (s) => /^[A-Z][a-z]+ \d{1,2}, \d{4}$/.test(s);
+  const isDate = (s) => /^[A-Z][a-z]+ \d{1,2}, \d{4}$/.test(s) || s === 'Today' || s === 'Yesterday';
   const nodes = main.querySelectorAll('h1,h2,h3,h4,[role="heading"],button');
   const rows = [];
   let heading = null;
@@ -67,7 +81,7 @@ return (() => {
     const leaves = [...node.querySelectorAll('*')]
       .filter((e) => e.children.length === 0 && e.textContent.trim())
       .map((e) => e.textContent.trim());
-    if (!leaves.length || !/\$[\d,]+\.\d{2}\s+[A-Z]{3}$/.test(leaves[leaves.length - 1])) continue;
+    if (!leaves.some((l) => /\$[\d,]+\.\d{2}\s+[A-Z]{3}$/.test(l))) continue;
     rows.push({heading: heading, date: isDate(heading || '') ? heading : null, spans: leaves});
   }
   return JSON.stringify({rows: rows, loadMore: loadMore});
@@ -234,7 +248,7 @@ async def authenticate(
                 )
             require_wealthsimple_url(current)
             await fill(session, page, [(textboxes[0], email), (textboxes[1], password)])
-            await click(session, page, ref)
+            await click_login(session, page, ref)
             credentials_sent_at = time.monotonic()
             continue
         elif (
@@ -250,10 +264,35 @@ async def authenticate(
     )
 
 
+async def click_login(session: BrowserOSSession, page: int, ref: str) -> None:
+    """Click Log in, working around a transient overlay covering the button."""
+    try:
+        await click(session, page, ref)
+        return
+    except RuntimeError as exc:
+        if "covered" not in str(exc):
+            raise
+    await session.call(
+        "evaluate_in_page", {"page": page, "code": DISMISS_OVERLAY_SCRIPT}
+    )
+    current = await snapshot(session, page)
+    new_ref = button_ref(current, "Log in")
+    try:
+        if new_ref is None:
+            raise RuntimeError("covered: Log in button missing")
+        await click(session, page, new_ref)
+    except RuntimeError as exc:
+        if "covered" not in str(exc):
+            raise
+        await session.call(
+            "evaluate_in_page", {"page": page, "code": CLICK_LOGIN_SCRIPT}
+        )
+
+
 async def read_rows(session: BrowserOSSession, page: int) -> dict[str, Any]:
     text = response_text(
         await session.call(
-            "evaluate",
+            "evaluate_in_page",
             {"page": page, "code": ROWS_SCRIPT, "maxChars": EVALUATE_MAX_CHARS},
         )
     )
@@ -264,6 +303,10 @@ async def read_rows(session: BrowserOSSession, page: int) -> dict[str, Any]:
 
 
 def parse_heading_date(heading: str) -> date:
+    if heading == "Today":
+        return date.today()
+    if heading == "Yesterday":
+        return date.today() - timedelta(days=1)
     return datetime.strptime(heading, "%B %d, %Y").date()
 
 
@@ -326,7 +369,15 @@ def transactions(rows: list[dict[str, Any]], since: date) -> list[dict[str, str]
         spans = row["spans"]
         if len(spans) < 3 or not spans[0] or not spans[1]:
             raise RuntimeError("Wealthsimple page changed: activity row is incomplete")
-        amount = spans[-1]
+        # Rows end with the running balance, so take the first currency leaf.
+        amount = next(
+            (
+                span
+                for span in spans[2:]
+                if re.search(r"\$[\d,]+\.\d{2}\s+[A-Z]{3}$", span)
+            ),
+            spans[-1],
+        )
         if not amount.endswith(" CAD"):
             raise RuntimeError("Wealthsimple activity has a non-CAD row")
         result.append(
