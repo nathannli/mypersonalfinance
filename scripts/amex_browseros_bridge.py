@@ -36,7 +36,13 @@ mcp = FastMCP("Amex BrowserOS Bridge")
 
 
 class BrowserOSSession(Protocol):
-    async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any: ...
+    async def call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> Any: ...
 
 
 class BrowserOSSessionFactory(Protocol):
@@ -64,9 +70,20 @@ class FastMCPBrowserOSSession:
     async def __aexit__(self, *args: object) -> None:
         await self.client.__aexit__(*args)
 
-    async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+    async def call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> Any:
         try:
-            result = await self.client.call_tool(tool_name, arguments)
+            if timeout is None:
+                result = await self.client.call_tool(tool_name, arguments)
+            else:
+                result = await self.client.call_tool(
+                    tool_name, arguments, timeout=timeout
+                )
         except Exception as exc:
             raise RuntimeError(f"BrowserOS MCP {tool_name} failed: {exc}") from exc
         return result.data if result.data is not None else result.content

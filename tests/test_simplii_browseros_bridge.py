@@ -34,11 +34,11 @@ def download_form(
     *,
     options=(CHEQUING, CARD),
     account=CHEQUING,
-    since=("September", "1", "2026"),
-    until=("October", "10", "2026"),
+    since="01/09/2026",
+    until="10/10/2026",
     fmt="Choose your software",
 ):
-    body = [f'- combobox "Account:" [collapsed] [ref=e38]: "{account}"']
+    body = [f'- combobox "Account" [collapsed] [ref=e38]: "{account}"']
     body += [
         f'- option "{option}" [ref=e4{index}]' for index, option in enumerate(options)
     ]
@@ -46,20 +46,11 @@ def download_form(
         '- radio "All since last download" [ref=e48]',
         '- generic "All within date range" [ref=e49]',
         '- radio "All within date range" [ref=e50]',
-        f'- combobox "From month" [collapsed] [ref=e51]: "{since[0]}"',
-        '- option "September" [ref=e52]',
-        '- option "October" [ref=e53]',
-        f'- combobox "From day" [collapsed] [ref=e64]: "{since[1]}"',
-        '- option "1" [ref=e65]',
-        f'- combobox "From year" [collapsed] [ref=e96]: "{since[2]}"',
-        '- option "2026" [ref=e97]',
-        f'- combobox "To month" [collapsed] [ref=e113]: "{until[0]}"',
-        '- option "October" [ref=e114]',
-        f'- combobox "To day" [collapsed] [ref=e126]: "{until[1]}"',
-        '- option "10" [ref=e127]',
-        f'- combobox "To year" [collapsed] [ref=e158]: "{until[2]}"',
-        '- option "2026" [ref=e159]',
-        f'- combobox "Financial management software:" [collapsed] [ref=e175]: "{fmt}"',
+        f'- textbox "From (DD/MM/YYYY)" [ref=e75]: "{since}"',
+        '- button "From (DD/MM/YYYY)" [ref=e76]',
+        f'- textbox "To (DD/MM/YYYY)" [ref=e78]: "{until}"',
+        '- button "To (DD/MM/YYYY)" [ref=e79]',
+        f'- combobox "Financial management software" [collapsed] [ref=e175]: "{fmt}"',
         '- option "Spreadsheet (CSV)" [ref=e179]',
         '- button "Download Transactions" [ref=e180]',
     ]
@@ -77,6 +68,20 @@ SIGNON_PREFILLED = page(
     '- textbox "Card number" [ref=e3]: "1111 2222 3333 4444"\n'
     '- textbox "Password (case sensitive)" [ref=e6]\n'
     '- button "Sign in." [ref=e9]',
+)
+SAVED_CARD_SIGNON = page(
+    SIGNON_URL,
+    '- combobox "Card number" [collapsed] [ref=e3]: "(5268********5108)"\n'
+    '- link "Sign on with a different card" [ref=e6]\n'
+    '- textbox "Password (case sensitive)" [ref=e7]\n'
+    '- button "Sign in." [ref=e10]',
+)
+SAVED_CARD_OTHER = page(
+    SIGNON_URL,
+    '- combobox "Card number" [collapsed] [ref=e3]: "(5268********9999)"\n'
+    '- link "Sign on with a different card" [ref=e6]\n'
+    '- textbox "Password (case sensitive)" [ref=e7]\n'
+    '- button "Sign in." [ref=e10]',
 )
 ACCOUNTS = page(
     ACCOUNTS_URL,
@@ -128,6 +133,20 @@ CODE_PAGE = page(
 OPAQUE = page(SIGNON_URL, '- heading "Please wait" [level=1]')
 
 
+def calendar_dialog(*days):
+    """The date picker as it reads once a calendar button is clicked."""
+    body = [
+        '- dialog "Choose date" [ref=e80]',
+        '- combobox "Month" [collapsed] [ref=e81]: "September"',
+        '- combobox "Year" [collapsed] [ref=e82]: "2026"',
+    ]
+    body += [f'- button "{day}" [ref=e8{3 + index}]' for index, day in enumerate(days)]
+    return page(SIGNON_URL, "\n".join(body))
+
+
+PICKER = calendar_dialog("September 1", "October 10")
+
+
 def applied_form(**overrides):
     """The export form as it reads back once the bridge has set it up."""
     overrides.setdefault("fmt", "Spreadsheet (CSV)")
@@ -144,6 +163,7 @@ class ScriptedBrowserOS:
         self.pages = list(pages)
         self.download = download
         self.calls = []
+        self.timeouts = []
 
     async def __aenter__(self):
         return self
@@ -151,8 +171,9 @@ class ScriptedBrowserOS:
     async def __aexit__(self, *args):
         return None
 
-    async def call(self, tool_name, arguments):
+    async def call(self, tool_name, arguments, *, timeout=None):
         self.calls.append((tool_name, arguments))
+        self.timeouts.append(timeout)
         if tool_name == "tabs":
             return "opened page 7"
         if tool_name == "snapshot":
@@ -210,6 +231,42 @@ class TestAuthenticate(unittest.TestCase):
         # The masking card field rejects `fill`, so the card number must travel
         # as keystrokes and the password as a verified fill value.
         self.assertEqual(browser.fills(), [{"ref": "e6", "value": "password"}])
+
+    def test_signs_in_with_the_matching_saved_card(self):
+        browser = ScriptedBrowserOS([SAVED_CARD_SIGNON, ACCOUNTS])
+        result = asyncio.run(
+            bridge.authenticate(
+                browser,
+                7,
+                "1111222233335108",
+                "password",
+                timeout=5,
+                poll_seconds=0,
+            )
+        )
+        self.assertIn("Sign out", result)
+        # Password only: the remembered card is accepted as-is.
+        self.assertEqual(browser.fills(), [{"ref": "e7", "value": "password"}])
+        self.assertEqual(
+            [arguments["ref"] for arguments in browser.acts("click")], ["e10"]
+        )
+
+    def test_a_different_saved_card_exposes_the_card_boxes(self):
+        browser = ScriptedBrowserOS([SAVED_CARD_OTHER, SIGNON, ACCOUNTS])
+        result = asyncio.run(
+            bridge.authenticate(
+                browser,
+                7,
+                "1111222233335108",
+                "password",
+                timeout=5,
+                poll_seconds=0,
+            )
+        )
+        self.assertIn("Sign out", result)
+        self.assertEqual(
+            [arguments["ref"] for arguments in browser.acts("click")], ["e6", "e9"]
+        )
 
     def test_clears_a_prefilled_card_number_before_typing(self):
         browser = self.authenticate([SIGNON_PREFILLED, ACCOUNTS])
@@ -333,6 +390,26 @@ class TestAuthenticate(unittest.TestCase):
         )
 
     @patch.object(bridge, "sms_reader_supported", return_value=True)
+    @patch.object(bridge, "wait_for_sms_code", return_value="654321")
+    def test_text_verification_clicks_next_when_continue_is_absent(
+        self, wait_for_code, _supported
+    ):
+        next_page = page(
+            SIGNON_URL,
+            '- textbox "Verification code" [ref=e40]\n- button "Next" [ref=e41]',
+        )
+        browser = ScriptedBrowserOS([VERIFICATION_WITH_SMS, next_page, ACCOUNTS])
+        asyncio.run(
+            bridge.authenticate(
+                browser, 7, "user-value", "password", timeout=5, poll_seconds=0
+            )
+        )
+        self.assertIn({"ref": "e40", "value": "654321"}, browser.fills())
+        self.assertEqual(
+            [arguments["ref"] for arguments in browser.acts("click")], ["e7", "e41"]
+        )
+
+    @patch.object(bridge, "sms_reader_supported", return_value=True)
     @patch.object(
         bridge,
         "wait_for_sms_code",
@@ -403,9 +480,11 @@ class TestAccountAndForm(unittest.TestCase):
         )
         self.assertEqual(browser.selects()[0]["value"], OTHER_CHEQUING)
 
-    def test_fills_the_account_range_dates_and_csv_format(self):
-        form = download_form()
-        browser = ScriptedBrowserOS([applied_form()])
+    def test_picks_the_account_range_dates_and_csv_format(self):
+        form = download_form(since="05/05/2025", until="06/06/2025")
+        browser = ScriptedBrowserOS(
+            [form, PICKER, PICKER, PICKER, form, PICKER, PICKER, PICKER, applied_form()]
+        )
         asyncio.run(
             bridge.fill_export_form(
                 browser, 7, form, "debit", date(2026, 9, 1), date(2026, 10, 10), None
@@ -413,28 +492,38 @@ class TestAccountAndForm(unittest.TestCase):
         )
         self.assertEqual(
             [selected["value"] for selected in browser.selects()],
-            [
-                CHEQUING,
-                "September",
-                "1",
-                "2026",
-                "October",
-                "10",
-                "2026",
-                "Spreadsheet (CSV)",
-            ],
+            [CHEQUING, "September", "2026", "October", "2026", "Spreadsheet (CSV)"],
         )
+        # Dates travel through the calendar picker: typing only changes what
+        # the form displays, never what it submits.
+        self.assertEqual(browser.fills(), [])
         # The radio is covered by its wrapper, so the wrapper is clicked instead.
+        self.assertEqual(
+            [arguments["ref"] for arguments in browser.acts("click")],
+            ["e49", "e76", "e83", "e79", "e84"],
+        )
+
+    def test_leaves_already_correct_dates_untouched(self):
+        # Editing one date box clears the other, so a box that already
+        # holds the wanted date must not be touched.
+        form = download_form()
+        browser = ScriptedBrowserOS([applied_form()])
+        asyncio.run(
+            bridge.fill_export_form(
+                browser, 7, form, "debit", date(2026, 9, 1), date(2026, 10, 10), None
+            )
+        )
+        self.assertEqual(browser.fills(), [])
         self.assertEqual(
             [arguments["ref"] for arguments in browser.acts("click")], ["e49"]
         )
 
     def test_refuses_when_the_form_does_not_keep_the_selection(self):
         form = download_form()
-        drifted = applied_form(since=("September", "2", "2026"))
-        browser = ScriptedBrowserOS([drifted])
+        drifted = applied_form(since="02/09/2026")
+        browser = ScriptedBrowserOS([drifted, PICKER, PICKER, PICKER, drifted, drifted])
         with self.assertRaisesRegex(
-            RuntimeError, "did not keep the requested From day"
+            RuntimeError, r"did not keep the requested From \(DD/MM/YYYY\)"
         ):
             asyncio.run(
                 bridge.fill_export_form(
@@ -530,9 +619,16 @@ class TestRunDownload(unittest.TestCase):
             self.assertEqual(result, downloaded.resolve())
             self.assertEqual(
                 [call for call in browser.calls if call[0] == "snapshot"],
-                [("snapshot", {"page": 7})] * 4,
+                [("snapshot", {"page": 7})] * 7,
             )
         self.assertEqual(browser.acts("click", ref="e29")[0]["kind"], "click")
+        download_calls = [
+            timeout
+            for (name, _), timeout in zip(browser.calls, browser.timeouts)
+            if name == "download"
+        ]
+        self.assertEqual(download_calls, [bridge.DOWNLOAD_TIMEOUT_SECONDS])
+        self.assertGreater(bridge.DOWNLOAD_TIMEOUT_SECONDS, 30)
         self.assertIn(
             ("tabs", {"action": "close", "page": 7}),
             browser.calls,

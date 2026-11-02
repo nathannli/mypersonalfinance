@@ -42,6 +42,7 @@ BASE_URL = "https://online.simplii.com/"
 SIMPLII_HOST = "simplii.com"
 LOGIN_TIMEOUT_SECONDS = 5 * 60
 ACTION_TIMEOUT_SECONDS = 30
+DOWNLOAD_TIMEOUT_SECONDS = 180
 POLL_SECONDS = 1.0
 LOGIN_REJECTED_AFTER_SECONDS = 20
 MFA_CODE_INITIAL_DELAY_SECONDS = 10
@@ -78,11 +79,12 @@ LOGIN_BUTTON = "Sign in."
 KEYBOARD_ONLY_FIELDS = ("Card number",)
 AUTHENTICATED_MARKER = "Sign out"
 DOWNLOAD_MENU_ITEM = "Download Transactions"
-ACCOUNT_FIELD = "Account:"
+ACCOUNT_FIELD = "Account"
 ACCOUNT_MARKERS = {"visa": ("visa",), "debit": ("chequing", "debit")}
 RANGE_FIELD = "All within date range"
-FROM_FIELDS = ("From month", "From day", "From year")
-TO_FIELDS = ("To month", "To day", "To year")
+FROM_FIELD = "From (DD/MM/YYYY)"
+TO_FIELD = "To (DD/MM/YYYY)"
+DATE_ENTRY_FORMAT = "%d/%m/%Y"
 MONTH_NAMES = (
     "January",
     "February",
@@ -97,7 +99,9 @@ MONTH_NAMES = (
     "November",
     "December",
 )
-FORMAT_FIELD = "Financial management software:"
+MONTH_COMBOBOX = "Month"
+YEAR_COMBOBOX = "Year"
+FORMAT_FIELD = "Financial management software"
 FORMAT_CHOICE = "Spreadsheet (CSV)"
 EXPORT_BUTTON = "Download Transactions"
 # The exported file keeps the parser's %m/%d/%Y dates and its own header.
@@ -115,7 +119,7 @@ VERIFICATION_SEND = "Send"
 SMS_CHOICES = ("sms",)
 PUSH_CHOICES = ("push to your device",)
 VERIFICATION_CODE_FIELD = "Verification code"
-VERIFICATION_BUTTON = "Continue"
+VERIFICATION_BUTTONS = ("Continue", "Next")
 # ---------------------------------------------------------------------------
 
 
@@ -244,6 +248,60 @@ def credentials_fields(current: str) -> list[tuple[str, str]] | None:
             return None
         fields.append((label, found[1]))
     return fields
+
+
+SAVED_CARD_FIELD = "Card number"
+DIFFERENT_CARD_LINK = "with a different card"
+
+
+def saved_card_visible(current: str) -> bool:
+    """A remembered card is offered through a dropdown instead of textboxes."""
+    return find_control(current, (SAVED_CARD_FIELD,), ("combobox",)) is not None
+
+
+def saved_card_matches(current: str, user: str) -> bool:
+    """The remembered card ends with the configured card number's last four."""
+    card = find_control(current, (SAVED_CARD_FIELD,), ("combobox",))
+    if card is None:
+        return False
+    want = re.sub(r"\D", "", user)[-4:]
+    shown = re.sub(r"\D", "", displayed_value(current, card[1]) or "")
+    return bool(want) and shown.endswith(want)
+
+
+async def maybe_saved_card_login(
+    session: BrowserOSSession, page: int, current: str, user: str, password: str
+) -> str | None:
+    """Sign on with the matching saved card, or expose the card boxes.
+
+    Returns "submitted", "switched", or None when this is not a saved-card
+    sign-on screen.
+    """
+    if find_control(current, (SAVED_CARD_FIELD,), ("combobox",)) is None:
+        return None
+    if saved_card_matches(current, user):
+        password_ref = require_control(
+            current,
+            ("Password",),
+            ("textbox",),
+            "Simplii page changed: the saved-card password field is unavailable",
+        )
+        signin_ref = require_control(
+            current,
+            (LOGIN_BUTTON,),
+            ("button",),
+            "Simplii page changed: the saved-card sign-on button is unavailable",
+        )
+        await act(
+            session, page, "fill", fields=[{"ref": password_ref, "value": password}]
+        )
+        await click(session, page, signin_ref)
+        return "submitted"
+    link = find_control(current, (DIFFERENT_CARD_LINK,), ("link",))
+    if link is None:
+        return None
+    await click(session, page, link[1])
+    return "switched"
 
 
 def is_authenticated_page(current: str) -> bool:
@@ -399,7 +457,7 @@ async def complete_text_message_verification(
     )
     await act(session, page, "fill", fields=[{"ref": field_ref, "value": code}])
     if (
-        submit := find_control(code_page, (VERIFICATION_BUTTON,), ("button",))
+        submit := find_control(code_page, VERIFICATION_BUTTONS, ("button",))
     ) is not None:
         await click(session, page, submit[1])
 
@@ -417,6 +475,7 @@ async def authenticate(
     deadline = time.monotonic() + timeout
     credentials_sent_at: float | None = None
     verification_seen = False
+    card_switched = False
     while time.monotonic() < deadline:
         current = await snapshot(session, page)
         try:
@@ -457,7 +516,20 @@ async def authenticate(
             credentials_sent_at = time.monotonic()
             continue
         if (
-            fields is not None
+            fields is None
+            and credentials_sent_at is None
+            and not verification_seen
+            and not card_switched
+        ):
+            acted = await maybe_saved_card_login(session, page, current, user, password)
+            if acted == "submitted":
+                credentials_sent_at = time.monotonic()
+                continue
+            if acted == "switched":
+                card_switched = True
+                continue
+        if (
+            (fields is not None or saved_card_visible(current))
             and credentials_sent_at is not None
             and not verification_seen
             and time.monotonic() - credentials_sent_at > LOGIN_REJECTED_AFTER_SECONDS
@@ -507,29 +579,81 @@ async def choose_account(
     return matches[0]
 
 
+def day_button_ref(current: str, label: str) -> str | None:
+    """Ref of the enabled calendar day button, matched exactly to dodge prefixes."""
+    for line in current.splitlines():
+        stripped = line.strip()
+        if (
+            stripped.startswith("- button")
+            and f'"{label}"' in stripped
+            and "[disabled]" not in stripped
+        ):
+            match = re.search(r"\[ref=(e\d+)\]", stripped)
+            if match:
+                return match.group(1)
+    return None
+
+
+async def pick_date(
+    session: BrowserOSSession, page: int, current: str, field: str, value: date
+) -> None:
+    """Set the date through the calendar picker.
+
+    Typing into the textbox only changes what the form displays; the picker
+    is the path the page commits to its own state.
+    """
+    button = require_control(
+        current,
+        (field,),
+        ("button",),
+        f"Simplii page changed: the {field} calendar button is unavailable",
+    )
+    await click(session, page, button)
+    dialog = await snapshot(session, page)
+    month_ref = require_control(
+        dialog,
+        (MONTH_COMBOBOX,),
+        ("combobox",),
+        "Simplii page changed: the calendar month list is unavailable",
+    )
+    await select(session, page, month_ref, MONTH_NAMES[value.month - 1])
+    dialog = await snapshot(session, page)
+    year_ref = require_control(
+        dialog,
+        (YEAR_COMBOBOX,),
+        ("combobox",),
+        "Simplii page changed: the calendar year list is unavailable",
+    )
+    await select(session, page, year_ref, str(value.year))
+    dialog = await snapshot(session, page)
+    day_label = f"{MONTH_NAMES[value.month - 1]} {value.day}"
+    day_ref = day_button_ref(dialog, day_label)
+    if day_ref is None:
+        raise RuntimeError(
+            f"Simplii page changed: the calendar has no enabled {day_label} day"
+        )
+    await click(session, page, day_ref)
+
+
 async def apply_date(
     session: BrowserOSSession,
     page: int,
     current: str,
-    fields: tuple[str, ...],
+    field: str,
     value: date,
-) -> list[tuple[tuple[str, ...], str]]:
-    choices = (
-        (fields[0], MONTH_NAMES[value.month - 1]),
-        (fields[1], str(value.day)),
-        (fields[2], str(value.year)),
-    )
-    expected = []
-    for name, chosen in choices:
-        ref = require_control(
-            current,
-            (name,),
-            ("combobox",),
-            f"Simplii page changed: the {name} control is unavailable",
-        )
-        await select(session, page, ref, chosen)
-        expected.append(((name,), chosen))
-    return expected
+) -> list[tuple[str, tuple[str, ...], str]]:
+    """Bring one date box to the wanted date, leaving an exact box alone."""
+    formatted = value.strftime(DATE_ENTRY_FORMAT)
+    box = find_control(current, (field,), ("textbox",))
+    if (
+        box is not None
+        and (displayed_value(current, box[1]) or "").strip() == formatted
+    ):
+        return [("textbox", (field,), formatted)]
+    # Editing one date box clears the other, so never touch a box that is
+    # already right; the picker commits what typing only displays.
+    await pick_date(session, page, current, field, value)
+    return [("textbox", (field,), formatted)]
 
 
 async def choose_range(session: BrowserOSSession, page: int, current: str) -> None:
@@ -564,14 +688,29 @@ async def fill_export_form(
 ) -> str:
     account_label = await choose_account(session, page, current, account, last_four)
     await choose_range(session, page, current)
-    expected = [((ACCOUNT_FIELD,), account_label)]
-    expected += await apply_date(session, page, current, FROM_FIELDS, since)
-    expected += await apply_date(session, page, current, TO_FIELDS, until)
+    # The date boxes render once the range is chosen, so re-read the form.
+    current = await snapshot(session, page)
+    expected = [("combobox", (ACCOUNT_FIELD,), account_label)]
+    expected += await apply_date(session, page, current, FROM_FIELD, since)
+    # Each edit can re-render the form, so re-read before the next one.
+    current = await snapshot(session, page)
+    expected += await apply_date(session, page, current, TO_FIELD, until)
+    current = await snapshot(session, page)
     await choose_format(session, page, current)
-    expected.append(((FORMAT_FIELD,), FORMAT_CHOICE))
+    expected.append(("combobox", (FORMAT_FIELD,), FORMAT_CHOICE))
     filled = await snapshot(session, page)
-    for names, wanted in expected:
-        if (state_of(filled, names, ("combobox",)) or "").strip() != wanted.strip():
+    for role, names, wanted in expected:
+        if role == "combobox":
+            actual = state_of(filled, names, ("combobox",)) or ""
+        else:
+            ref = require_control(
+                filled,
+                names,
+                ("textbox",),
+                f"Simplii page changed: the {names[0]} control is unavailable",
+            )
+            actual = displayed_value(filled, ref) or ""
+        if actual.strip() != wanted.strip():
             raise RuntimeError(
                 "Simplii page changed: the export form did not keep the "
                 f"requested {names[0]} selection"
@@ -586,8 +725,14 @@ async def trigger_export(session: BrowserOSSession, page: int, current: str) -> 
         ("button",),
         "Simplii page changed: the export button is unavailable",
     )
+    # The bank builds the CSV server-side; the default 30s tool budget can
+    # expire while it is still generating.
     downloaded = download_path(
-        await session.call("download", {"page": page, "ref": button_ref})
+        await session.call(
+            "download",
+            {"page": page, "ref": button_ref},
+            timeout=DOWNLOAD_TIMEOUT_SECONDS,
+        )
     )
     if downloaded.suffix.lower() != ".csv":
         raise RuntimeError(f"Simplii exported a non-CSV artifact: {downloaded.name}")
