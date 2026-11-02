@@ -60,7 +60,7 @@ class ScriptedBrowserOS:
         self.calls.append((tool_name, arguments))
         if tool_name == "snapshot":
             return self.pages.pop(0) if len(self.pages) > 1 else self.pages[0]
-        if tool_name == "evaluate":
+        if tool_name == "evaluate_in_page":
             state = self.rows.pop(0) if len(self.rows) > 1 else self.rows[0]
             return page(TARGET, json.dumps(state))
         if tool_name == "tabs":
