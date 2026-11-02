@@ -37,6 +37,27 @@ class RepeatingBrowserOS(FakeBrowserOS):
         return self.response
 
 
+class ScriptedBrowserOS(AbstractAsyncContextManager):
+    """FakeBrowserOS whose queued outcomes may raise."""
+
+    def __init__(self, script):
+        self.script = iter(script)
+        self.calls = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def call(self, tool_name, arguments):
+        self.calls.append((tool_name, arguments))
+        outcome = next(self.script)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
 class TestAmexBrowserOSBridge(unittest.TestCase):
     def test_uses_neo_default_mcp_endpoint(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -151,6 +172,70 @@ class TestAmexBrowserOSBridge(unittest.TestCase):
                 ("act", {"page": 3, "kind": "click", "ref": "e12"}),
             ],
         )
+
+    def test_login_click_dismisses_overlay_and_retries_with_fresh_ref(self):
+        login_snapshot = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/en-ca/account/login/]
+- textbox "User ID" [ref=e10]
+- textbox "Password" [ref=e11]
+- button "Log In" [ref=e12]"""
+        refreshed_snapshot = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/en-ca/account/login/]
+- button "Log In" [ref=e21]"""
+        browser = ScriptedBrowserOS(
+            [
+                None,
+                RuntimeError('act failed: button "Log In" is covered by <x>'),
+                None,
+                refreshed_snapshot,
+                None,
+            ]
+        )
+
+        asyncio.run(bridge.fill_login(browser, 3, login_snapshot, "user", "password"))
+
+        self.assertEqual(
+            [(tool, args.get("kind")) for tool, args in browser.calls],
+            [
+                ("act", "fill"),
+                ("act", "click"),
+                ("evaluate", None),
+                ("snapshot", None),
+                ("act", "click"),
+            ],
+        )
+        self.assertEqual(browser.calls[4][1]["ref"], "e21")
+
+    def test_login_click_falls_back_to_in_page_click_when_overlay_persists(self):
+        login_snapshot = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/en-ca/account/login/]
+- textbox "User ID" [ref=e10]
+- textbox "Password" [ref=e11]
+- button "Log In" [ref=e12]"""
+        refreshed_snapshot = """[UNTRUSTED_PAGE_CONTENT origin=https://www.americanexpress.com/en-ca/account/login/]
+- button "Log In" [ref=e21]"""
+        browser = ScriptedBrowserOS(
+            [
+                None,
+                RuntimeError('act failed: button "Log In" is covered by <x>'),
+                None,
+                refreshed_snapshot,
+                RuntimeError('act failed: button "Log In" is covered by <x>'),
+                None,
+            ]
+        )
+
+        asyncio.run(bridge.fill_login(browser, 3, login_snapshot, "user", "password"))
+
+        self.assertEqual(
+            [(tool, args.get("kind")) for tool, args in browser.calls],
+            [
+                ("act", "fill"),
+                ("act", "click"),
+                ("evaluate", None),
+                ("snapshot", None),
+                ("act", "click"),
+                ("evaluate", None),
+            ],
+        )
+        self.assertIn("Log In", browser.calls[5][1]["func"])
 
     def test_response_text_never_requires_browseros_response_shape(self):
         self.assertEqual(

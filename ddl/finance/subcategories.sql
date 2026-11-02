@@ -41,8 +41,8 @@ INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (30, '
 INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (31, 'Hydro', 12, 2) ON CONFLICT DO NOTHING;
 INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (32, 'Internet', 12, 2) ON CONFLICT DO NOTHING;
 INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (33, 'Mobile', 12, 2) ON CONFLICT DO NOTHING;
-INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (34, 'China', 11, 1) ON CONFLICT DO NOTHING;
-INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (35, 'Paris', 11, 1) ON CONFLICT DO NOTHING;
+INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (34, 'China2026', 11, 1) ON CONFLICT DO NOTHING;
+INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (35, 'Paris2026', 11, 1) ON CONFLICT DO NOTHING;
 INSERT INTO subcategories (id, name, category_id, expense_type_id) VALUES (36, 'AI', 13, 1) ON CONFLICT DO NOTHING;
 
 SELECT setval(pg_get_serial_sequence('subcategories', 'id'), (SELECT max(id) FROM subcategories));

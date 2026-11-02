@@ -284,7 +284,58 @@ async def fill_login(
             ],
         },
     )
-    await click(session, page, ref_for(login_snapshot, "button", "Log In"))
+    await click_login(session, page, login_snapshot)
+
+
+async def click_login(
+    session: BrowserOSSession, page: int, login_snapshot: str
+) -> None:
+    """Click Log In, working around a transient overlay covering the button."""
+    try:
+        await click(session, page, ref_for(login_snapshot, "button", "Log In"))
+        return
+    except RuntimeError as exc:
+        if "covered" not in str(exc):
+            raise
+    await dismiss_login_overlay(session, page)
+    current = await snapshot(session, page)
+    try:
+        await click(session, page, ref_for(current, "button", "Log In"))
+    except RuntimeError as exc:
+        if "covered" not in str(exc):
+            raise
+        await click_login_in_page(session, page)
+
+
+async def dismiss_login_overlay(session: BrowserOSSession, page: int) -> None:
+    """Dismiss a transient overlay (banner, chat bubble) with Escape."""
+    await session.call(
+        "evaluate",
+        {
+            "page": page,
+            "func": (
+                "() => { document.dispatchEvent(new KeyboardEvent("
+                "'keydown', {key: 'Escape', keyCode: 27, bubbles: true})); }"
+            ),
+        },
+    )
+
+
+async def click_login_in_page(session: BrowserOSSession, page: int) -> None:
+    """Click the Log In button in-page when an overlay keeps covering it."""
+    await session.call(
+        "evaluate",
+        {
+            "page": page,
+            "func": (
+                "() => { const button = [...document.querySelectorAll("
+                "'button')].find(element => "
+                "element.textContent.trim() === 'Log In'); "
+                "if (!button) throw new Error('Log In button missing'); "
+                "button.click(); }"
+            ),
+        },
+    )
 
 
 def require_no_interactive_challenge(current: str) -> None:
