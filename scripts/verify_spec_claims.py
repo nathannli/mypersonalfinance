@@ -120,7 +120,7 @@ def finance() -> None:
         "F2b finance.subcategories ids 1..36, no gaps",
         f"got {[r[0] for r in sub]}",
     )
-    for sid, sname in ((34, "China"), (35, "Paris"), (36, "AI")):
+    for sid, sname in ((34, "China2026"), (35, "Paris2026"), (36, "AI")):
         check(
             (sid, sname) in [(r[0], r[1]) for r in sub],
             f"F2c finance.subcategories id {sid} is {sname!r}",
@@ -298,7 +298,7 @@ def finance() -> None:
     # committed DDL now carries the rows §I recorded as missing
     ddl_cat = ddl_text("ddl/finance/categories.sql")
     ddl_sub = ddl_text("ddl/finance/subcategories.sql")
-    for name in ("Coding", "China", "Paris", "AI"):
+    for name in ("Coding", "China2026", "Paris2026", "AI"):
         where = ddl_cat if name == "Coding" else ddl_sub
         check(
             f"'{name}'" in where,
