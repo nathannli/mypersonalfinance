@@ -28,6 +28,8 @@ CARD_TYPE_LABELS = {
     "ws_credit": "Wealthsimple",
     "simplii_visa": "Simplii",
     "simplii_debit": "Simplii",
+    "td_visa": "TD",
+    "td_debit": "TD",
 }
 
 

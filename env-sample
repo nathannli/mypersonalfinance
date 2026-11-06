@@ -14,6 +14,11 @@ SIMPLII_PASSWORD=your_simplii_password
 # Optional: last four digits of the Simplii account to download, needed only
 # when several accounts of the requested type match.
 SIMPLII_ACCOUNT=
-# BrowserOS writes the Simplii export under the bank's fixed name inside the
-# browser's own download directory, so point this at that directory.
+# BrowserOS writes the Simplii and TD exports under the bank's fixed name inside
+# the browser's own download directory, so point this at that directory.
 BROWSEROS_DOWNLOAD_DIR=~/Downloads
+TD_USER=your_td_username_or_access_card_number
+TD_PASSWORD=your_td_password
+# Optional: Discord alert bot endpoint. The TD downloader posts here to tell you
+# to approve the sign-in push in the TD app.
+DISCORD_ALERT_URL=http://host_name_or_ip:port/alert
