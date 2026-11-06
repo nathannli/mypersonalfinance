@@ -68,13 +68,6 @@ PRIVACY_DIALOG = 'alertdialog "Privacy"'
 PRIVACY_CLOSE = "Close"
 
 
-def credentials() -> tuple[str, str]:
-    values = tuple(os.environ.get(name, "") for name in ("TD_USER", "TD_PASSWORD"))
-    if not all(values):
-        raise RuntimeError("TD_USER and TD_PASSWORD must be configured locally")
-    return values
-
-
 def require_td_url(current: str) -> str:
     url = page_url(current)
     hostname = urlparse(url).hostname
