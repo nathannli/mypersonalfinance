@@ -9,8 +9,8 @@ Personal finance transaction loaders for two PostgreSQL databases.
 Two databases, two shapes. `finance` is a two-level taxonomy
 (`categories` → `subcategories` → `expense_type`). `parents_finance` is
 one level (`main_category` → `categories`, no subcategory) and keeps its own
-naming. They are not converged on each other, and their taxonomy id conventions
-are inverted. See [Database schema and rebuild](ddl/README.md).
+naming. They are not converged on each other, but their fixed/variable ids
+match (1 variable, 2 fixed). See [Database schema and rebuild](ddl/README.md).
 
 ## setup
 

@@ -5,11 +5,11 @@ CREATE TABLE IF NOT EXISTS main_category (
     CONSTRAINT main_category_name_key UNIQUE (name)
 );
 
--- The id is the whole point of this table. parents_finance inverts
--- finance.expense_type: here 1 is Fixed and 2 is Variable. Copying a row
--- across the two databases silently mis-buckets every expense.
-INSERT INTO main_category (id, name) VALUES (1, 'Fixed') ON CONFLICT DO NOTHING;
-INSERT INTO main_category (id, name) VALUES (2, 'Variable') ON CONFLICT DO NOTHING;
+-- The id is the whole point of this table. It matches finance.expense_type:
+-- 1 is variable and 2 is fixed, in lowercase, so a row copies across the two
+-- databases without mis-bucketing any expense.
+INSERT INTO main_category (id, name) VALUES (1, 'variable') ON CONFLICT DO NOTHING;
+INSERT INTO main_category (id, name) VALUES (2, 'fixed') ON CONFLICT DO NOTHING;
 
 -- The INSERTs above pin explicit ids, so the sequence is still at 1 and the
 -- first runtime insert after a rebuild would collide with a seeded id.
