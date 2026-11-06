@@ -80,6 +80,8 @@ class TdDebitStatement(FileBasedCardStatement):
             "CPP              CPP",
             "TAX REFUND       RIT",
             "OLD AGE SEC      OAS",
+            "TD ATM DEP",  # ATM deposits
+            "HAYS PERSONNEL PAY",  # Payroll deposits
         ]
 
         # Filter out transactions from skip list
