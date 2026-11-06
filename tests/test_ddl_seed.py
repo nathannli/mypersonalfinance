@@ -74,7 +74,6 @@ TAXONOMY_NAMES = frozenset(
         "Fees",
         "Fees & Interest",
         "Fitness",
-        "Fixed",
         "Food",
         "Food Delivery",
         "Full Reimburse",
@@ -118,7 +117,6 @@ TAXONOMY_NAMES = frozenset(
         "Travel",
         "Tuitions",
         "Utilities",
-        "Variable",
         "fixed",
         "variable",
     }

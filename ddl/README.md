@@ -117,14 +117,15 @@ have no subcategory column, so their 2-column `UNIQUE` is correct there —
 `finance`'s are 3-column, also correct. Converging the two is a regression, not
 an improvement.
 
-Their id conventions are **inverted**:
+Their fixed/variable ids match:
 
 | | id 1 | id 2 |
 | --- | --- | --- |
 | `finance.expense_type` | `variable` | `fixed` |
-| `parents_finance.main_category` | `Fixed` | `Variable` |
+| `parents_finance.main_category` | `variable` | `fixed` |
 
-A row copied between the two silently mis-buckets every expense.
+`parents_finance` carried the opposite order (1 `Fixed`, 2 `Variable`) until
+`scripts/one-time/migrate_parents_main_category_swap.py` flipped it.
 
 ## Verifying
 

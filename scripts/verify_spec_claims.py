@@ -341,8 +341,8 @@ def parents() -> None:
 
     mc = q(db, "select id, name from main_category order by id")
     check(
-        mc == [(1, "Fixed"), (2, "Variable")],
-        "P2 parents.main_category is (1,'Fixed'),(2,'Variable') -- INVERTED vs finance",
+        mc == [(1, "variable"), (2, "fixed")],
+        "P2 parents.main_category is (1,'variable'),(2,'fixed') -- same as finance",
         f"got {mc}",
     )
     check(

@@ -10,28 +10,28 @@ CREATE TABLE IF NOT EXISTS categories (
 -- Live ids are authoritative, gaps included. 6 and 16 were never issued and
 -- no expense references either. A dense 1..22 re-seed shifts every id from 7
 -- upward and mis-resolves the 4124 expenses that point at them.
-INSERT INTO categories (id, name, main_category_id) VALUES (1, 'Clothing', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (2, 'Donation', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (3, 'Entertainment', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (4, 'Food', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (5, 'Fund Tfr', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (7, 'Household', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (8, 'Housekeeping', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (9, 'Insurance', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (10, 'Loans', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (11, 'Medical/Health', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (12, 'NewHome', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (13, 'Transportation', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (14, 'Tuitions', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (15, 'ApartmentRental', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (17, 'MISCexpense', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (18, 'Taxes/Legal', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (19, 'Fees & Interest', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (20, 'Kitchen', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (21, 'Hygiene', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (22, 'Utilities', 1) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (23, 'Misc - Cash Payment', 2) ON CONFLICT DO NOTHING;
-INSERT INTO categories (id, name, main_category_id) VALUES (24, 'Rent Mortgage', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (1, 'Clothing', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (2, 'Donation', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (3, 'Entertainment', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (4, 'Food', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (5, 'Fund Tfr', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (7, 'Household', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (8, 'Housekeeping', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (9, 'Insurance', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (10, 'Loans', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (11, 'Medical/Health', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (12, 'NewHome', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (13, 'Transportation', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (14, 'Tuitions', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (15, 'ApartmentRental', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (17, 'MISCexpense', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (18, 'Taxes/Legal', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (19, 'Fees & Interest', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (20, 'Kitchen', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (21, 'Hygiene', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (22, 'Utilities', 2) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (23, 'Misc - Cash Payment', 1) ON CONFLICT DO NOTHING;
+INSERT INTO categories (id, name, main_category_id) VALUES (24, 'Rent Mortgage', 2) ON CONFLICT DO NOTHING;
 
 -- The Gifts/Donations row the previous version of this file seeded is gone.
 -- It is not in the live table, and a rebuild must match live rather than
