@@ -13,8 +13,8 @@ Take a backup first:
     pg_dump "$POSTGRES_CONNECTION_STRING/parents_finance" > /path/outside/repo.sql
 
 Usage:
-    uv run --frozen python scripts/migrate_parents_main_category_swap.py --dry-run
-    uv run --frozen python scripts/migrate_parents_main_category_swap.py
+    uv run --frozen python scripts/one-time/migrate_parents_main_category_swap.py --dry-run
+    uv run --frozen python scripts/one-time/migrate_parents_main_category_swap.py
 """
 
 from __future__ import annotations

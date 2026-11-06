@@ -125,7 +125,7 @@ Their fixed/variable ids match:
 | `parents_finance.main_category` | `variable` | `fixed` |
 
 `parents_finance` carried the opposite order (1 `Fixed`, 2 `Variable`) until
-`scripts/migrate_parents_main_category_swap.py` flipped it.
+`scripts/one-time/migrate_parents_main_category_swap.py` flipped it.
 
 ## Verifying
 
