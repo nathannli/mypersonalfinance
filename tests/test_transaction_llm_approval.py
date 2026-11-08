@@ -437,8 +437,8 @@ class TestValidatorRuntimeParity(unittest.TestCase):
         return cast(
             Config,
             SimpleNamespace(
-                opencodex_base_url=BASE_URL,
-                opencodex_api_key="x",
+                llm_base_url=BASE_URL,
+                llm_api_key="x",
                 transaction_llm_model=MODEL,
                 enriched_transaction_llm_model=MODEL,
                 transaction_llm_timeout_seconds=5.0,

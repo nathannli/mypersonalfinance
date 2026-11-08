@@ -51,8 +51,8 @@ runner = load_runner()
 
 def fake_config():
     return SimpleNamespace(
-        opencodex_base_url="http://localhost:10100",
-        opencodex_api_key="x",
+        llm_base_url="http://localhost:10100",
+        llm_api_key="x",
         transaction_llm_model="exact-model-id",
         enriched_transaction_llm_model="enriched-model-id",
         transaction_llm_timeout_seconds=5.0,

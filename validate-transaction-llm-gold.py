@@ -104,7 +104,7 @@ def _run_enriched(
 
     record_path = write_enriched_approval_record(
         database=database_name,
-        base_url=config.opencodex_base_url,
+        base_url=config.llm_base_url,
         model=model,
         choices=choices,
         cases=cases,
@@ -141,7 +141,7 @@ def _run_legacy(
 
     record_path = write_approval_record(
         database=database_name,
-        base_url=config.opencodex_base_url,
+        base_url=config.llm_base_url,
         model=model,
         choices=choices,
         cases=cases,

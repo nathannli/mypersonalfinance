@@ -31,11 +31,11 @@ class TestTransactionLlmConfig(unittest.TestCase):
             with patch("config.load_dotenv"):
                 config = Config()
 
-        self.assertEqual(config.opencodex_base_url, "http://localhost:10100")
-        self.assertEqual(config.opencodex_api_key, "")
+        self.assertEqual(config.llm_base_url, "http://localhost:10100")
+        self.assertEqual(config.llm_api_key, "")
         self.assertEqual(
             config.transaction_llm_model,
-            "SingularityApiDev/deepseek-v4-flash-0731",
+            "singularity/claude-haiku-5-5",
         )
         self.assertEqual(config.transaction_llm_timeout_seconds, 120.0)
         self.assertEqual(config.transaction_llm_mode, "shadow")
@@ -53,7 +53,7 @@ class TestTransactionLlmConfig(unittest.TestCase):
         )
         self.assertEqual(
             config.transaction_llm_model,
-            "SingularityApiDev/deepseek-v4-flash-0731",
+            "singularity/claude-haiku-5-5",
         )
 
     def test_reads_the_enriched_model_override(self):
@@ -81,8 +81,8 @@ class TestTransactionLlmConfig(unittest.TestCase):
 
     def test_reads_valid_llm_environment(self):
         environment = {
-            "OPENCODEX_BASE_URL": "http://proxy:20200/v1",
-            "OPENCODEX_API_KEY": "secret",
+            "LLM_BASE_URL": "http://proxy:20200/v1",
+            "LLM_API_KEY": "secret",
             "TRANSACTION_LLM_MODEL": "provider/model",
             "TRANSACTION_LLM_TIMEOUT_SECONDS": "4.5",
             "TRANSACTION_LLM_MODE": "write",
@@ -90,8 +90,8 @@ class TestTransactionLlmConfig(unittest.TestCase):
         with patch.dict(os.environ, environment, clear=True):
             config = Config()
 
-        self.assertEqual(config.opencodex_base_url, "http://proxy:20200/v1")
-        self.assertEqual(config.opencodex_api_key, "secret")
+        self.assertEqual(config.llm_base_url, "http://proxy:20200/v1")
+        self.assertEqual(config.llm_api_key, "secret")
         self.assertEqual(config.transaction_llm_model, "provider/model")
         self.assertEqual(config.transaction_llm_timeout_seconds, 4.5)
         self.assertEqual(config.transaction_llm_mode, "write")
@@ -117,8 +117,8 @@ class TestTransactionLoaderCliLlm(unittest.TestCase):
         return cast(
             Config,
             SimpleNamespace(
-                opencodex_base_url="http://localhost:10100",
-                opencodex_api_key="x",
+                llm_base_url="http://localhost:10100",
+                llm_api_key="x",
                 transaction_llm_model="exact-model",
                 enriched_transaction_llm_model="enriched-model",
                 transaction_llm_timeout_seconds=5.0,

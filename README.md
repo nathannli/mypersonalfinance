@@ -336,6 +336,78 @@ Manual authenticated acceptance test:
 4. Confirm a later `--since` yields fewer rows than the earlier run's file.
 5. Run the same command again and confirm it refuses to overwrite the file.
 
+## downloading TD transactions
+
+The TD downloader signs in to TD EasyWeb through BrowserOS neo and exports the
+joint chequing account or the Cash Back Visa as CSV. It reads `TD_USER` (the
+username or access card number) and `TD_PASSWORD` from the repository `.env`.
+TD's two-step verification is an approval in the TD app, which a person must give:
+the run prints one notice, posts the same text to the Discord alert bot when
+`DISCORD_ALERT_URL` is set, and then waits up to five minutes for the signed-in
+page. A failed post is only a warning; approve the push either way.
+
+```sh
+uv run --frozen python -m scripts.download_td_transactions \
+  --output-dir ~/Downloads/td \
+  --database parents_finance \
+  --account debit \
+  --since 2026-06-06
+```
+
+`--account` is `debit` (chequing) or `visa`. `--since` is the oldest transaction
+date to keep and `--until` defaults to today. TD keeps about 18 months, so an older
+`--since` is refused before anything opens. Chequing is one export of the range set
+in the account's date filter. The Visa exports one statement period at a time, so
+the run downloads every period that overlaps the range, then merges them. Rows are
+kept only when dated inside `--since` to `--until`, because a statement period can
+start before `--since`. The downloader validates the file through the `td_debit` or
+`td_visa` parser and prints the exact `load-transactions.py` command. It never
+connects to PostgreSQL or runs the loader.
+
+`td_debit` skips transfers, e-transfers, bill and card payments, ATM and mobile
+deposits, payroll deposits and government benefits before loading. The same
+parser serves `finance`.
+
+TD saves every export as `accountactivity.csv` in the browser's own download
+directory, so `BROWSEROS_DOWNLOAD_DIR` must point at that directory. The bridge
+moves each file into a private temporary folder at once, the downloader deletes
+that folder after merging, and the merged file refuses to overwrite an existing
+one. Keep `--output-dir` outside the repository, and never commit statement data.
+
+Security boundaries:
+
+- Credentials come from `.env` only, are never printed or passed as CLI arguments,
+  and are filled only after the page origin is confirmed to be a `td.com` host.
+- A CAPTCHA ends the run with an actionable error; nothing is bypassed or retried
+  in a loop.
+- The run signs out of TD and closes its tab when it finishes.
+
+Troubleshooting:
+
+- `requires an interactive security challenge`: TD showed a CAPTCHA. Sign in by
+  hand in BrowserOS neo, then rerun.
+- `did not complete sign-in before the timeout`: the push approval was not given
+  in five minutes. Rerun and approve it in the TD app.
+- `TD offers a different saved card than TD_USER`: TD remembered another card.
+  Sign in by hand once with the right one, then rerun.
+- `rejected the login credentials`: check `TD_USER` and `TD_PASSWORD`.
+- `did not keep the requested date range`: the filter reset mid-run; rerun.
+- `lists N ... accounts`: more than one account matches the request.
+- `outside its download directory`: `BROWSEROS_DOWNLOAD_DIR` does not match the
+  browser's download folder.
+- `page changed` or `Timed out waiting for TD ...`: TD changed a page. Update the
+  verified UI facts block at the top of `scripts/td_browseros_bridge.py`.
+
+Manual authenticated acceptance test:
+
+1. Run the downloader for `--account debit` into an empty output directory,
+   approve the push, and confirm the handoff names the `td_debit` type.
+2. Run it for `--account visa` and confirm the handoff names `td_visa`.
+3. Confirm both saved files parse to exactly `date`, `merchant`, `cost`,
+   `cc_category`.
+4. Confirm a later `--since` yields fewer rows than the earlier run's file.
+5. Run the same command again and confirm it refuses to overwrite the file.
+
 ## LLM transaction categorization
 
 Unknown transactions are categorized by an LLM instead of an interactive
@@ -347,9 +419,9 @@ matched transaction makes no provider request.
 ### Environment
 
 ```sh
-OPENCODEX_BASE_URL=http://localhost:10100
-OPENCODEX_API_KEY=<key>
-TRANSACTION_LLM_MODEL=SingularityApiDev/deepseek-v4-flash-0731
+LLM_BASE_URL=http://localhost:10100
+LLM_API_KEY=<key>
+TRANSACTION_LLM_MODEL=singularity/claude-haiku-5-5
 ENRICHED_TRANSACTION_LLM_MODEL=anthropic/claude-haiku-4-5
 TRANSACTION_LLM_TIMEOUT_SECONDS=120
 TRANSACTION_LLM_MODE=shadow
@@ -359,10 +431,10 @@ TRANSACTION_LLM_MODE=shadow
 `ENRICHED_TRANSACTION_LLM_MODEL` governs enriched `finance` only; it defaults to
 `anthropic/claude-haiku-4-5` and never changes the parents path. Only the
 configured base URL and the exact configured model are ever called; there is no
-provider or model fallback. A missing or empty `OPENCODEX_API_KEY` becomes a
+provider or model fallback. A missing or empty `LLM_API_KEY` becomes a
 `provider_error` on the first LLM call, so deterministic-only runs need no key.
 
-`OPENCODEX_BASE_URL` is part of the enriched write approval identity, and only
+`LLM_BASE_URL` is part of the enriched write approval identity, and only
 trailing slashes and surrounding whitespace are normalized. Host spelling and
 port are significant, so `http://127.0.0.1:10102` and
 `http://localhost:10102` are different identities and only the exact approved
@@ -426,13 +498,13 @@ inserts the expense. Applying a suggestion is a manual decision.
 
 ### Cloud and proxy trust
 
-`anthropic/claude-haiku-4-5` and `SingularityApiDev/deepseek-v4-flash-0731` are
+`anthropic/claude-haiku-4-5` and `singularity/claude-haiku-5-5` are
 cloud models. Merchant names, amounts, and the live category list for the
 selected database leave the local network when an unknown transaction is
 categorized, and the derived merchant term leaves it during research. The
 configured OpenCodex proxy is the trusted routing boundary: approval binds the
 normalized proxy URL and the exact requested model ID, but it cannot attest
-which upstream route the proxy chooses. Point `OPENCODEX_BASE_URL` at a proxy
+which upstream route the proxy chooses. Point `LLM_BASE_URL` at a proxy
 you control.
 
 ### Shadow mode and write mode
