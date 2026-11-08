@@ -81,7 +81,8 @@ class TdDebitStatement(FileBasedCardStatement):
             "TAX REFUND       RIT",
             "OLD AGE SEC      OAS",
             "TD ATM DEP",  # ATM deposits
-            "HAYS PERSONNEL PAY",  # Payroll deposits
+            "HAYS PERSONNEL   PAY",  # Payroll deposits (TD pads the description)
+            "LI NELSON WING",  # Unknown credit, owner decision 2026-11-08 to skip (short form: TD padding after the name varies)
         ]
 
         # Filter out transactions from skip list
