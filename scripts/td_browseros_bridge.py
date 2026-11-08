@@ -90,7 +90,7 @@ LOGOUT_LINK = "Logout"
 # Chequing activity page: a "Quick filters" combobox, a "Filter" button opening a
 # form with "From" and "To" textboxes (typed as MM/DD/YYYY, shown as "Oct 8,
 # 2026") and an "Apply filters" button. After applying, Quick filters reads
-# "Custom" and the page says "<Mon d, yyyy> - <Mon d, yyyy>". The page's
+# "Custom" and the table's date cells fall inside the range. The page's
 # "Download" button opens the dialog; the range exported is the filtered range.
 # TD keeps about 18 months of history here.
 QUICK_FILTERS = "Quick filters"
@@ -99,6 +99,10 @@ FROM_FIELD = "From"
 TO_FIELD = "To"
 APPLY_FILTERS = "Apply filters"
 CUSTOM_RANGE = "Custom"
+# The transaction table's date cells read like "Oct 8, 2026". The range text above
+# the table is not in the accessibility snapshot, so the cells are what is checked.
+TABLE_DATE_PATTERN = re.compile(r'^\s*- cell "([A-Z][a-z]{2} \d{1,2}, \d{4})"', re.M)
+TABLE_DATE_FORMAT = "%b %d, %Y"
 PAGE_DOWNLOAD = "Download"
 MAX_HISTORY_DAYS = 548
 # Visa activity is a separate app. It renders blank for several seconds, then
@@ -332,8 +336,12 @@ def form_date(value: date) -> str:
     return value.strftime("%m/%d/%Y")
 
 
-def shown_date(value: date) -> str:
-    return f"{value:%b} {value.day}, {value.year}"
+def table_dates(current: str) -> list[date]:
+    """The dates in the activity table's first column, as TD shows them."""
+    return [
+        datetime.strptime(text, TABLE_DATE_FORMAT).date()
+        for text in TABLE_DATE_PATTERN.findall(current)
+    ]
 
 
 def require_history_window(since: date, today: date | None = None) -> None:
@@ -462,12 +470,16 @@ async def apply_date_range(
 
     def applied(c: str) -> bool:
         ref = control_named(c, QUICK_FILTERS, ("combobox",))
-        return ref is not None and displayed_value(c, ref) == CUSTOM_RANGE
+        if ref is None or displayed_value(c, ref) != CUSTOM_RANGE:
+            return False
+        # The table still shows the old range until the filter lands.
+        dates = table_dates(c)
+        return bool(dates) and all(since <= day <= until for day in dates)
 
-    result = await wait_for(session, page, applied, "the date range to apply")
-    if shown_date(since) not in result or shown_date(until) not in result:
-        raise RuntimeError("TD did not keep the requested date range")
-    return result
+    try:
+        return await wait_for(session, page, applied, "the date range to apply")
+    except RuntimeError as exc:
+        raise RuntimeError("TD did not keep the requested date range") from exc
 
 
 async def open_download_dialog(
