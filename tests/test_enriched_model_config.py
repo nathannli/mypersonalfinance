@@ -34,8 +34,8 @@ def fake_config(mode: str = "write") -> Config:
     return cast(
         Config,
         SimpleNamespace(
-            opencodex_base_url="http://localhost:10100",
-            opencodex_api_key="x",
+            llm_base_url="http://localhost:10100",
+            llm_api_key="x",
             transaction_llm_model=LEGACY_MODEL,
             enriched_transaction_llm_model=ENRICHED_MODEL,
             transaction_llm_timeout_seconds=5.0,
@@ -56,7 +56,7 @@ class TestConfigModelDefaults(unittest.TestCase):
         )
         self.assertEqual(
             config.transaction_llm_model,
-            "SingularityApiDev/deepseek-v4-flash-0731",
+            "singularity/claude-haiku-5-5",
         )
 
     def test_enriched_override_does_not_move_the_legacy_model(self):

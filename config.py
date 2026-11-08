@@ -7,8 +7,8 @@ class Config:
     postgres_connection_string: str | None
     ws_debt_link: str | None
     ws_credit_link: str | None
-    opencodex_base_url: str
-    opencodex_api_key: str
+    llm_base_url: str
+    llm_api_key: str
     transaction_llm_model: str
     enriched_transaction_llm_model: str
     transaction_llm_timeout_seconds: float
@@ -23,13 +23,11 @@ class Config:
         self.postgres_connection_string = os.getenv("POSTGRES_CONNECTION_STRING")
         self.ws_debt_link = os.getenv("WS_DEBIT_LINK")
         self.ws_credit_link = os.getenv("WS_CREDIT_LINK")
-        self.opencodex_base_url = os.getenv(
-            "OPENCODEX_BASE_URL", "http://localhost:10100"
-        )
-        self.opencodex_api_key = os.getenv("OPENCODEX_API_KEY", "")
+        self.llm_base_url = os.getenv("LLM_BASE_URL", "http://localhost:10100")
+        self.llm_api_key = os.getenv("LLM_API_KEY", "")
         self.transaction_llm_model = os.getenv(
             "TRANSACTION_LLM_MODEL",
-            "SingularityApiDev/deepseek-v4-flash-0731",
+            "singularity/claude-haiku-5-5",
         )
         # Enriched finance reads its own model so pinning the enriched default
         # never changes TRANSACTION_LLM_MODEL or the parents_finance path (V51).

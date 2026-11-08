@@ -419,9 +419,9 @@ matched transaction makes no provider request.
 ### Environment
 
 ```sh
-OPENCODEX_BASE_URL=http://localhost:10100
-OPENCODEX_API_KEY=<key>
-TRANSACTION_LLM_MODEL=SingularityApiDev/deepseek-v4-flash-0731
+LLM_BASE_URL=http://localhost:10100
+LLM_API_KEY=<key>
+TRANSACTION_LLM_MODEL=singularity/claude-haiku-5-5
 ENRICHED_TRANSACTION_LLM_MODEL=anthropic/claude-haiku-4-5
 TRANSACTION_LLM_TIMEOUT_SECONDS=120
 TRANSACTION_LLM_MODE=shadow
@@ -431,10 +431,10 @@ TRANSACTION_LLM_MODE=shadow
 `ENRICHED_TRANSACTION_LLM_MODEL` governs enriched `finance` only; it defaults to
 `anthropic/claude-haiku-4-5` and never changes the parents path. Only the
 configured base URL and the exact configured model are ever called; there is no
-provider or model fallback. A missing or empty `OPENCODEX_API_KEY` becomes a
+provider or model fallback. A missing or empty `LLM_API_KEY` becomes a
 `provider_error` on the first LLM call, so deterministic-only runs need no key.
 
-`OPENCODEX_BASE_URL` is part of the enriched write approval identity, and only
+`LLM_BASE_URL` is part of the enriched write approval identity, and only
 trailing slashes and surrounding whitespace are normalized. Host spelling and
 port are significant, so `http://127.0.0.1:10102` and
 `http://localhost:10102` are different identities and only the exact approved
@@ -498,13 +498,13 @@ inserts the expense. Applying a suggestion is a manual decision.
 
 ### Cloud and proxy trust
 
-`anthropic/claude-haiku-4-5` and `SingularityApiDev/deepseek-v4-flash-0731` are
+`anthropic/claude-haiku-4-5` and `singularity/claude-haiku-5-5` are
 cloud models. Merchant names, amounts, and the live category list for the
 selected database leave the local network when an unknown transaction is
 categorized, and the derived merchant term leaves it during research. The
 configured OpenCodex proxy is the trusted routing boundary: approval binds the
 normalized proxy URL and the exact requested model ID, but it cannot attest
-which upstream route the proxy chooses. Point `OPENCODEX_BASE_URL` at a proxy
+which upstream route the proxy chooses. Point `LLM_BASE_URL` at a proxy
 you control.
 
 ### Shadow mode and write mode

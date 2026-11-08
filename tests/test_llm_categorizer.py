@@ -176,6 +176,21 @@ class TestOpenCodexCategorizer(unittest.TestCase):
         self.assertIsNone(result.choice_id)
         self.assertEqual(result.reason, UnresolvedReason.ABSTAINED)
 
+    def test_fenced_json_select_is_accepted(self):
+        context = finance_context()
+        post = RecordingPost(
+            FakeResponse(
+                envelope=envelope('```json\n{"action":"select","choice_id":36}\n```')
+            )
+        )
+
+        result = OpenCodexCategorizer(
+            OpenCodexConfig("http://localhost:10100", "x"), post=post
+        ).categorize(context)
+
+        self.assertEqual(result.action, ProviderAction.SELECT)
+        self.assertEqual(result.choice_id, 36)
+
     def test_invalid_provider_content_is_contained_with_stable_reason(self):
         context = finance_context()
         cases = [

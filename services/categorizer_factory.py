@@ -47,8 +47,8 @@ def build_categorizer(
     """
     return OpenCodexCategorizer(
         OpenCodexConfig(
-            base_url=config.opencodex_base_url,
-            api_key=config.opencodex_api_key,
+            base_url=config.llm_base_url,
+            api_key=config.llm_api_key,
             model=config.transaction_llm_model if model is None else model,
             timeout_seconds=config.transaction_llm_timeout_seconds,
             mode=config.transaction_llm_mode,
@@ -74,7 +74,7 @@ def write_authorizer_for(
     choices: Iterable[Mapping[str, object]] = choices_provider()
     return authorize_write_mode(
         database=database,
-        base_url=config.opencodex_base_url,
+        base_url=config.llm_base_url,
         model=config.transaction_llm_model,
         choices=choices,
     )
@@ -97,7 +97,7 @@ def enriched_write_authorizer_for(
         return None
     return authorize_enriched_write_mode(
         database=database,
-        base_url=config.opencodex_base_url,
+        base_url=config.llm_base_url,
         model=config.enriched_transaction_llm_model,
         choices_provider=choices_provider,
         packet_resolver=packet_resolver,
