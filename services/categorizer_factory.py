@@ -1,8 +1,7 @@
 """Shared construction of the transaction categorizer.
 
-Both entry points (`load-transactions.py` via the CLI and
-`load-excel-transactions.py`) build the categorizer here so write-mode
-gating and provider configuration have exactly one implementation.
+`load-transactions.py` builds the categorizer here so write-mode gating and
+provider configuration have exactly one implementation.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence

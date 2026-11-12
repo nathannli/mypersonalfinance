@@ -102,15 +102,6 @@ uv run --frozen python load-transactions.py --type ws_debit --filepath ws-debit.
 uv run --frozen python load-transactions.py --type ws_credit --filepath ws-credit.csv --database finance
 ```
 
-Load pre-categorized Excel transactions:
-
-```sh
-uv run --frozen python load-excel-transactions.py --filepath <path_to_excel>
-```
-
-`bin/parents-db-cron.sh` runs this over FTP-fetched workbooks and reports
-failures to Discord; `cron/crontab` schedules it.
-
 ## database rebuild
 
 `ddl/` rebuilds both databases from scratch: schema, constraints, and taxonomy,
@@ -470,8 +461,7 @@ Troubleshooting:
 ## LLM transaction categorization
 
 Unknown transactions are categorized by an LLM instead of an interactive
-prompt, so `load-transactions.py` and `load-excel-transactions.py` both finish
-without user input. Existing deterministic matching (card category rules, exact
+prompt, so `load-transactions.py` finishes without user input. Existing deterministic matching (card category rules, exact
 merchant auto-match, substring auto-match) always runs first and always wins; a
 matched transaction makes no provider request.
 
