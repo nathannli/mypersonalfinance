@@ -408,6 +408,65 @@ Manual authenticated acceptance test:
 4. Confirm a later `--since` yields fewer rows than the earlier run's file.
 5. Run the same command again and confirm it refuses to overwrite the file.
 
+## downloading Rogers Bank transactions
+
+The Rogers downloader signs in to Rogers Bank self-serve through BrowserOS neo
+and exports the Rogers Red World Elite Mastercard activity as CSV. It reads
+`ROGERS_USER` and `ROGERS_PASSWORD` from the repository `.env`. Rogers' identity
+verification offers several delivery options; the run selects the one ending in
+5162 and reads the texted code from this machine's Messages app
+(`wait_for_sms_code` in `scripts/browser_common.py`), so no one has to relay the
+code. The code is never printed or logged.
+
+```sh
+uv run --frozen python -m scripts.download_rogers_transactions \
+  --output-dir ~/Downloads/rogers \
+  --database parents_finance \
+  --since 2026-06-06
+```
+
+`--since` is the oldest transaction date to keep and `--until` defaults to today.
+Rogers offers about 13 statement months, so an older `--since` is refused before
+anything opens. There is one card under the login and no `--account` flag; a
+login showing several cards is an error. The export is one statement month at a
+time from the transactions page, so the run downloads every month that overlaps
+the range (including `Current transactions`), then merges them. Rows are kept
+only when dated inside `--since` to `--until`, because a statement month can
+start before `--since`. The downloader validates the file through the `rogers`
+parser and prints the exact `load-transactions.py` command. It never connects to
+PostgreSQL or runs the loader.
+
+Rogers saves every export as `transactions.csv` in the browser's own download
+directory, so `BROWSEROS_DOWNLOAD_DIR` must point at that directory. The bridge
+moves each file into a private temporary folder at once, the downloader deletes
+that folder after merging, and the merged file refuses to overwrite an existing
+one. Keep `--output-dir` outside the repository, and never commit statement data.
+
+Security boundaries:
+
+- Credentials and the verification code come from `.env` and Messages only, are
+  never printed or passed as CLI arguments, and are filled only after the page
+  origin is confirmed to be a `rogersbank.com` host.
+- A CAPTCHA ends the run with an actionable error; nothing is bypassed or retried
+  in a loop.
+- The run signs out of Rogers Bank and closes its tab when it finishes.
+
+Troubleshooting:
+
+- `requires an interactive security challenge`: Rogers showed a CAPTCHA. Sign in
+  by hand in BrowserOS neo, then rerun.
+- `did not complete sign-in before the timeout`: sign-in stalled for five
+  minutes. Rerun.
+- `did not offer the approved verification option`: the identity dialog changed
+  its options. Check which option ends in 5162 in BrowserOS neo by hand.
+- `sent a verification code by SMS but this machine could not read it`: Messages
+  access is missing or the code did not arrive in three minutes. Check Full Disk
+  Access for the terminal, then rerun.
+- `rejected the login credentials`: check `ROGERS_USER` and `ROGERS_PASSWORD`.
+- `page changed` or `Timed out waiting for Rogers ...`: Rogers changed a page.
+  Update the verified UI facts block at the top of
+  `scripts/rogers_browseros_bridge.py`.
+
 ## LLM transaction categorization
 
 Unknown transactions are categorized by an LLM instead of an interactive

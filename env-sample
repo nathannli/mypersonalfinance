@@ -19,6 +19,8 @@ SIMPLII_ACCOUNT=
 BROWSEROS_DOWNLOAD_DIR=~/Downloads
 TD_USER=your_td_username_or_access_card_number
 TD_PASSWORD=your_td_password
+ROGERS_USER=your_rogers_bank_username
+ROGERS_PASSWORD=your_rogers_bank_password
 # Optional: Discord alert bot endpoint. The TD downloader posts here to tell you
 # to approve the sign-in push in the TD app.
 DISCORD_ALERT_URL=http://host_name_or_ip:port/alert

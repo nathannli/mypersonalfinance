@@ -30,6 +30,7 @@ CARD_TYPE_LABELS = {
     "simplii_debit": "Simplii",
     "td_visa": "TD",
     "td_debit": "TD",
+    "rogers": "Rogers Bank",
 }
 
 
