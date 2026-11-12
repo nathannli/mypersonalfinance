@@ -1,1 +1,0 @@
-0 21 * * 5 bash /home/nathan/git/mypersonalfinance/bin/parents-db-cron.sh >> ~/cron-logs/parents-db-cron.log 2>&1
