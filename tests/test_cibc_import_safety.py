@@ -2,14 +2,16 @@
 
 import subprocess
 import sys
+import unittest
 
 
-def test_import_does_not_connect_to_postgres():
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            """
+class TestCibcImportSafety(unittest.TestCase):
+    def test_import_does_not_connect_to_postgres(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                """
 import psycopg
 import sqlalchemy
 
@@ -20,8 +22,8 @@ sqlalchemy.create_engine = forbidden
 import scripts.download_cibc_transactions
 import scripts.cibc_browseros_bridge
 """,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
