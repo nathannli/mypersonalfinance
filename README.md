@@ -458,6 +458,52 @@ Troubleshooting:
   Update the verified UI facts block at the top of
   `scripts/rogers_browseros_bridge.py`.
 
+## CIBC Mastercard transaction download
+
+Configure `CIBC_USER` (card number), `CIBC_PASSWORD`, and `BROWSEROS_MCP_URL`
+locally in `.env`. Keep BrowserOS neo running. `BROWSEROS_DOWNLOAD_DIR` must
+match its download directory. Run from an interactive SSH terminal:
+
+```sh
+uv run --frozen python -m scripts.download_cibc_transactions \
+  --output-dir ~/Downloads/cibc \
+  --database parents_finance \
+  --since 2026-10-01 --until 2026-10-31
+```
+
+`--database` is required (`finance` or `parents_finance`); this workflow uses
+`parents_finance`. `--until` defaults to today. Starts before December 11, 2011
+are refused. The sole eligible CIBC Mastercard is selected; zero or multiple
+cards stop the run rather than guessing.
+
+CIBC automatically sends a push containing a six-digit verification code when
+required. One secret-free reminder is attempted through `DISCORD_ALERT_URL`.
+Missing or failed delivery is a warning, not a reason to block terminal entry.
+Enter the code at `CIBC verification code:` in the SSH terminal. Input stays
+hidden. The total deadline is 180 seconds, including notification delivery;
+invalid formats may be corrected within that deadline. A missing terminal,
+timeout, EOF, rejected/expired code, or interruption stops the run. Rerun manually;
+there is no automatic resend, SMS/voice fallback, or login retry. Never pass a
+code in arguments, environment variables, files, Discord, or chat.
+
+The downloader exports one date range as headerless CSV, keeps only rows whose
+transaction dates fall within the inclusive range, validates with `cibc_mc`,
+and prints a shell-safe manual loader command. Existing payment/refund
+exclusions are unchanged. It never opens PostgreSQL or runs the loader.
+
+**Freshness limitation:** CIBC excludes the current day and two previous
+business days from CSV downloads. Success does not mean complete coverage
+through `--until`; the newest row does not establish an available-through date.
+Site-stated history back to 2011 does not prove this card has activity that old.
+
+Output is `cibc-mc-<since>-<until>.csv` outside the repository, with overwrite
+refused. Raw exports use a private temporary directory removed after validation.
+Only the task-owned tab is closed, with best-effort sign-out on success/failure.
+Credentials and codes are filled only on exact HTTPS host `secure.cibc.com`;
+exports use `www.cibconline.cibc.com`. Unknown security challenges or changed
+controls stop the run. The first production load needs a separate approved
+simulation and CIBC-specific overlap/parity check.
+
 ## LLM transaction categorization
 
 Unknown transactions are categorized by an LLM instead of an interactive
