@@ -1,6 +1,7 @@
 """Local MCP bridge for unattended Amex activity downloads through BrowserOS neo."""
 
 import asyncio
+import json
 import os
 import re
 import socket
@@ -86,7 +87,78 @@ class FastMCPBrowserOSSession:
                 )
         except Exception as exc:
             raise RuntimeError(f"BrowserOS MCP {tool_name} failed: {exc}") from exc
-        return result.data if result.data is not None else result.content
+        return _normalize_mcp_result(tool_name, result)
+
+
+def _first_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        if not content:
+            raise RuntimeError("BrowserOS returned empty content")
+        return response_text(content[0])
+    return response_text(content)
+
+
+def _read_confined_tool_output(raw_path: Any) -> str:
+    if not isinstance(raw_path, str) or not raw_path:
+        raise RuntimeError("BrowserOS returned an invalid tool output path")
+    root = DEFAULT_BROWSEROS_DOWNLOAD_DIR.expanduser().resolve()
+    try:
+        resolved = Path(raw_path).expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"BrowserOS saved output file is missing or unreadable: {exc}"
+        ) from exc
+    if not resolved.is_relative_to(root):
+        raise RuntimeError("BrowserOS saved output path escapes tool-output directory")
+    if not resolved.is_file():
+        raise RuntimeError("BrowserOS saved output path is not a regular file")
+    try:
+        return resolved.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"BrowserOS saved output file could not be read: {exc}"
+        ) from exc
+
+
+def _normalize_mcp_result(tool_name: str, result: Any) -> Any:
+    data = getattr(result, "data", None)
+    content = getattr(result, "content", None)
+    if tool_name == "snapshot":
+        if isinstance(data, dict) and data.get("writtenToFile") is True:
+            return _read_confined_tool_output(data.get("path"))
+        if content is not None:
+            return _first_content_text(content)
+        return data
+    if tool_name == "evaluate_in_page":
+        if isinstance(data, dict):
+            if data.get("writtenToFile") is True:
+                raw = _read_confined_tool_output(data.get("path"))
+                try:
+                    envelope = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(
+                        "BrowserOS saved evaluate output is invalid JSON"
+                    ) from exc
+                if (
+                    not isinstance(envelope, dict)
+                    or envelope.get("isError") is not False
+                ):
+                    raise RuntimeError(
+                        "BrowserOS saved evaluate output reported an error"
+                    )
+                structured = envelope.get("structuredContent")
+                if not isinstance(structured, dict) or "value" not in structured:
+                    raise RuntimeError(
+                        "BrowserOS saved evaluate output is missing structuredContent.value"
+                    )
+                return structured["value"]
+            return data.get("value")
+        if content is not None:
+            return _first_content_text(content)
+        return data
+    return data if data is not None else content
 
 
 def browseros_mcp_url() -> str:
@@ -163,7 +235,20 @@ def response_text(response: Any) -> str:
 
 
 def page_from_response(response: Any) -> int:
-    match = re.search(r"\bpage\s+(\d+)\b", response_text(response), re.IGNORECASE)
+    if isinstance(response, dict):
+        page = response.get("page")
+        if isinstance(page, bool) or not isinstance(page, int) or page < 0:
+            raise RuntimeError("BrowserOS did not return a valid task-owned page id")
+        return page
+    if isinstance(response, list):
+        if not response:
+            raise RuntimeError("BrowserOS did not return a task-owned page")
+        first_text = response_text(response[0])
+    else:
+        first_text = response_text(response)
+    match = re.search(
+        r"\b(?:opened|created)\s+page\s+(\d+)\b", first_text, re.IGNORECASE
+    )
     if match is None:
         raise RuntimeError("BrowserOS did not return a task-owned page")
     try:
@@ -327,7 +412,7 @@ async def click_login(
 async def dismiss_login_overlay(session: BrowserOSSession, page: int) -> None:
     """Dismiss a transient overlay (banner, chat bubble) with Escape."""
     await session.call(
-        "evaluate",
+        "evaluate_in_page",
         {
             "page": page,
             "func": (
@@ -341,7 +426,7 @@ async def dismiss_login_overlay(session: BrowserOSSession, page: int) -> None:
 async def click_login_in_page(session: BrowserOSSession, page: int) -> None:
     """Click the Log In button in-page when an overlay keeps covering it."""
     await session.call(
-        "evaluate",
+        "evaluate_in_page",
         {
             "page": page,
             "func": (

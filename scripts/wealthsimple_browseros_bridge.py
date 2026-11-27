@@ -32,7 +32,7 @@ TOTP_STEP_SECONDS = 30
 TOTP_MIN_REMAINING_SECONDS = 3
 MAX_TOTP_ATTEMPTS = 2
 MAX_LOAD_MORE_CLICKS = 200
-EVALUATE_MAX_CHARS = 5_000_000
+EVALUATE_MAX_CHARS = 150_000
 LOGIN_REJECTED_AFTER_SECONDS = 20
 MAX_ACTIVITY_NAVIGATIONS = 2
 NAVIGATION_SETTLE_SECONDS = 3
@@ -290,16 +290,33 @@ async def click_login(session: BrowserOSSession, page: int, ref: str) -> None:
 
 
 async def read_rows(session: BrowserOSSession, page: int) -> dict[str, Any]:
-    text = response_text(
-        await session.call(
-            "evaluate_in_page",
-            {"page": page, "code": ROWS_SCRIPT, "maxChars": EVALUATE_MAX_CHARS},
-        )
+    raw = await session.call(
+        "evaluate_in_page",
+        {"page": page, "code": ROWS_SCRIPT, "maxChars": EVALUATE_MAX_CHARS},
     )
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match is None:
+    if raw is None:
         raise RuntimeError("BrowserOS returned unreadable Wealthsimple activity")
-    return json.loads(match.group(0))
+    text = response_text(raw)
+    lines = text.splitlines()
+    if lines and lines[0].startswith("[UNTRUSTED_PAGE_CONTENT"):
+        if len(lines) < 2 or not lines[-1].startswith("[END"):
+            raise RuntimeError("BrowserOS returned unreadable Wealthsimple activity")
+        payload_text = "\n".join(lines[1:-1])
+    else:
+        payload_text = text
+    try:
+        parsed = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "BrowserOS returned unreadable Wealthsimple activity"
+        ) from exc
+    if (
+        not isinstance(parsed, dict)
+        or not isinstance(parsed.get("rows"), list)
+        or not isinstance(parsed.get("loadMore"), bool)
+    ):
+        raise RuntimeError("BrowserOS returned unreadable Wealthsimple activity")
+    return parsed
 
 
 def parse_heading_date(heading: str) -> date:
