@@ -12,6 +12,7 @@ from services.llm_categorizer import OpenCodexCategorizer, OpenCodexConfig
 from services.research_packets import ResearchPacket
 from services.transaction_categorization import CanonicalContext
 from services.transaction_llm_approval import (
+    ApprovalError,
     ENRICHED_GOLD_DATABASE,
     authorize_enriched_write_mode,
     authorize_write_mode,
@@ -27,6 +28,8 @@ class WriteAuthorizers:
 
     legacy: WriteAuthorizer | None = None
     enriched: EnrichedWriteAuthorizer | None = None
+    enriched_backup: EnrichedWriteAuthorizer | None = None
+    use_backup_only: bool = False
 
 
 def build_categorizer(
@@ -85,6 +88,7 @@ def enriched_write_authorizer_for(
     choices_provider: Callable[[], Sequence[Mapping[str, object]]],
     *,
     packet_resolver: Callable[[str], object],
+    model: str | None = None,
 ) -> EnrichedWriteAuthorizer | None:
     """Resolve the packet-bound write authorizer, failing closed (V33).
 
@@ -97,7 +101,7 @@ def enriched_write_authorizer_for(
     return authorize_enriched_write_mode(
         database=database,
         base_url=config.llm_base_url,
-        model=config.enriched_transaction_llm_model,
+        model=model or config.enriched_transaction_llm_model,
         choices_provider=choices_provider,
         packet_resolver=packet_resolver,
     )
@@ -118,6 +122,28 @@ def write_authorizers_for(
     ``parents_finance`` keeps the unenriched gate unchanged (V2).
     """
     if database == ENRICHED_GOLD_DATABASE:
+        backup = getattr(config, "enriched_transaction_llm_backup_model", "")
+        if backup and backup != config.enriched_transaction_llm_model:
+            try:
+                primary = enriched_write_authorizer_for(
+                    config, database, choices_provider, packet_resolver=packet_resolver
+                )
+            except ApprovalError:
+                return WriteAuthorizers(
+                    enriched_backup=enriched_write_authorizer_for(
+                        config, database, choices_provider,
+                        packet_resolver=packet_resolver, model=backup,
+                    ),
+                    use_backup_only=True,
+                )
+            try:
+                fallback = enriched_write_authorizer_for(
+                    config, database, choices_provider,
+                    packet_resolver=packet_resolver, model=backup,
+                )
+            except ApprovalError:
+                fallback = None
+            return WriteAuthorizers(enriched=primary, enriched_backup=fallback)
         return WriteAuthorizers(
             enriched=enriched_write_authorizer_for(
                 config,

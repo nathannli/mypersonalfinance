@@ -42,6 +42,7 @@ from services.transaction_llm_approval import (
     approved_packet_for_enriched_case,
     build_enriched_fingerprints,
     build_fingerprints,
+    enriched_approval_key,
 )
 from utils.repo_paths import private_approval_path
 
@@ -86,8 +87,8 @@ class EnrichedCaseResult:
     fingerprint: str
     matched: bool
     detail: str
-
     deterministic: bool = False
+
 
 @dataclass
 class EnrichedPassResult:
@@ -237,9 +238,9 @@ def run_enriched_pass(
     categorizer_factory: CategorizerFactory,
     *,
     packet_resolver: Callable[[str], object],
-) -> EnrichedPassResult:
     on_case: Callable[[EnrichedCaseResult], None] | None = None,
     resolve_rule: Callable[[EnrichedGoldCase], DeterministicResolution] | None = None,
+) -> EnrichedPassResult:
     """Run one fresh enriched pass through the exact production path (V31).
 
     Eligibility is re-checked per case immediately before its request, so a
@@ -255,7 +256,6 @@ def run_enriched_pass(
     for case in cases:
         packet = approved_packet_for_enriched_case(case, packet_resolver)
         context = case.build_context(choice_rows)
-        calls_before = categorizer.provider_call_count
         if resolve_rule is not None:
             rule = resolve_rule(case)
             if rule.outcome != DeterministicOutcome.NO_MATCH:
@@ -272,6 +272,7 @@ def run_enriched_pass(
                 if on_case is not None:
                     on_case(checked)
                 continue
+        calls_before = categorizer.provider_call_count
         cache_hits_before = categorizer.cache_hit_count
 
         execution = categorizer.categorize_enriched(context, packet)
@@ -294,13 +295,12 @@ def run_enriched_pass(
 
         result.results.append(evaluate_enriched_case(case, execution.decision))
         result.provider_calls += calls_made
-
         if on_case is not None:
             on_case(result.results[-1])
 
     return result
 
-    return result
+
 def _run_parallel_enriched_pass(
     cases: Sequence[EnrichedGoldCase],
     choices: list[Mapping[str, object]],
@@ -331,6 +331,7 @@ def _run_parallel_enriched_pass(
                 result.failure = result.failure or single.failure
             if result.failure is not None:
                 break
+    return result
 
 
 def run_enriched_validation(
@@ -339,16 +340,16 @@ def run_enriched_validation(
     categorizer_factory: CategorizerFactory,
     *,
     packet_resolver: Callable[[str], object],
-) -> EnrichedValidationResult:
     workers: int = 1,
     on_case: Callable[[int, EnrichedCaseResult], None] | None = None,
     resolve_rule: Callable[[EnrichedGoldCase], DeterministicResolution] | None = None,
+) -> EnrichedValidationResult:
     """Run consecutive fresh enriched passes, stopping at the first failure."""
     if not cases:
         raise ApprovalError("enriched gold subset contains no cases for this database")
-
     if not 1 <= workers <= 3:
         raise ValueError("workers must be between 1 and 3")
+
     choice_rows = list(choices)
     validation = EnrichedValidationResult()
     for pass_number in range(1, REQUIRED_PASSES + 1):
@@ -468,7 +469,6 @@ def write_enriched_approval_record(
             document = dict(existing)
 
     record = build_enriched_fingerprints(database, base_url, model, choices, cases)
-    record["passes"] = len(validation.passes)
     # A case may authorize model writes only if the model passed it every time.
     model_cases = {case.fingerprint for case in cases}
     for single in validation.passes:
@@ -478,8 +478,15 @@ def write_enriched_approval_record(
     if not model_cases:
         raise ApprovalError("no cases passed through the model in all three passes")
     record["model_case_fingerprints"] = sorted(model_cases)
+    record["passes"] = len(validation.passes)
     record["approved_at"] = datetime.now(UTC).isoformat()
+    previous = document.get(ENRICHED_APPROVAL_KEY)
+    if isinstance(previous, Mapping):
+        previous_url, previous_model = previous.get("base_url"), previous.get("model")
+        if isinstance(previous_url, str) and isinstance(previous_model, str):
+            document.setdefault(enriched_approval_key(previous_url, previous_model), previous)
     document[ENRICHED_APPROVAL_KEY] = record
+    document[enriched_approval_key(base_url, model)] = record
 
     _atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     return path

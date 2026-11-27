@@ -275,7 +275,7 @@ class MyFinanceDB(FinanceDB):
             context,
             packet,
             execution.decision,
-            categorizer,
+            execution.source or categorizer,
         )
 
     def _apply_enriched_decision(

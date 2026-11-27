@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 import requests
@@ -412,6 +412,8 @@ class EnrichedExecution:
 
     decision: EnrichedDecision | None = None
     reason: UnresolvedReason | None = None
+    failover_eligible: bool = False
+    source: "OpenCodexCategorizer | None" = None
 
     def __post_init__(self) -> None:
         if (self.decision is None) == (self.reason is None):
@@ -842,6 +844,8 @@ class OpenCodexCategorizer:
         self.provider_call_count = 0
         self.cache_hit_count = 0
         self.consecutive_failures = 0
+        self._enriched_availability_failure = False
+        self.enriched_backup: OpenCodexCategorizer | None = None
         self.circuit_open = False
 
     def categorize(self, context: CanonicalContext) -> CategorizationResult:
@@ -951,6 +955,15 @@ class OpenCodexCategorizer:
     def categorize_enriched(
         self, context: CanonicalContext, packet: ResearchPacket
     ) -> EnrichedExecution:
+        result = self._categorize_enriched(context, packet)
+        if result.failover_eligible and self.enriched_backup is not None:
+            backup = self.enriched_backup
+            return replace(backup.categorize_enriched(context, packet), source=backup)
+        return result
+
+    def _categorize_enriched(
+        self, context: CanonicalContext, packet: ResearchPacket
+    ) -> EnrichedExecution:
         """Execute one enriched request against an approved frozen packet.
 
         The cache is packet-bound, so a cached answer can only ever be replayed
@@ -963,7 +976,10 @@ class OpenCodexCategorizer:
             return EnrichedExecution(reason=UnresolvedReason.INVALID_CONTEXT)
 
         if self.circuit_open:
-            return EnrichedExecution(reason=UnresolvedReason.CIRCUIT_OPEN)
+            return EnrichedExecution(
+                reason=UnresolvedReason.CIRCUIT_OPEN,
+                failover_eligible=self._enriched_availability_failure,
+            )
 
         cache_key = self._enriched_cache_key(context, packet)
         cached = self._enriched_cache.get(cache_key)
@@ -989,14 +1005,36 @@ class OpenCodexCategorizer:
                 timeout=self.config.timeout_seconds,
             )
         except requests.Timeout:
-            return self._enriched_retryable_failure(UnresolvedReason.TIMEOUT)
+            self._enriched_availability_failure = True
+            self._enriched_retryable_failure(UnresolvedReason.TIMEOUT)
+            return EnrichedExecution(reason=UnresolvedReason.TIMEOUT, failover_eligible=True)
+        except requests.ConnectionError:
+            self._enriched_availability_failure = True
+            self._enriched_immediate_failure(UnresolvedReason.PROVIDER_ERROR)
+            return EnrichedExecution(reason=UnresolvedReason.PROVIDER_ERROR, failover_eligible=True)
         except Exception:
             return self._enriched_immediate_failure(UnresolvedReason.PROVIDER_ERROR)
 
         status_code = getattr(response, "status_code", None)
         if not isinstance(status_code, int) or status_code < 200 or status_code >= 300:
-            return self._enriched_immediate_failure(UnresolvedReason.PROVIDER_ERROR)
+            self._enriched_availability_failure = (
+                isinstance(status_code, int)
+                and (status_code == 429 or 500 <= status_code < 600)
+            )
+            if status_code in (400, 404):
+                try:
+                    self._enriched_availability_failure = response.json()["error"]["code"] in (
+                        "model_not_found", "model_unavailable", "model_not_priceable",
+                    )
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    pass
+            self._enriched_immediate_failure(UnresolvedReason.PROVIDER_ERROR)
+            return EnrichedExecution(
+                reason=UnresolvedReason.PROVIDER_ERROR,
+                failover_eligible=self._enriched_availability_failure,
+            )
 
+        self._enriched_availability_failure = False
         try:
             envelope = response.json()
         except (TypeError, ValueError):

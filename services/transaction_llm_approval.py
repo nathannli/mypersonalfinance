@@ -753,7 +753,13 @@ def build_enriched_fingerprints(
     }
 
 
-def load_enriched_approval_record(path: Path | None = None) -> Mapping[str, Any]:
+def enriched_approval_key(base_url: str, model: str) -> str:
+    return f"{ENRICHED_APPROVAL_KEY}:{sha256_hex(canonical_json_bytes([normalize_base_url(base_url), model]))}"
+
+
+def load_enriched_approval_record(
+    path: Path | None = None, *, key: str = ENRICHED_APPROVAL_KEY
+) -> Mapping[str, Any]:
     """Load the enriched approval record, never the unenriched one (V33)."""
     approval_path = path or private_approval_path()
     if not approval_path.exists():
@@ -766,7 +772,7 @@ def load_enriched_approval_record(path: Path | None = None) -> Mapping[str, Any]
         raise ApprovalError("approval record could not be read") from exc
     if not isinstance(document, Mapping):
         raise ApprovalError("approval record must be a JSON object")
-    record = document.get(ENRICHED_APPROVAL_KEY)
+    record = document.get(key, document.get(ENRICHED_APPROVAL_KEY))
     if not isinstance(record, Mapping):
         raise ApprovalError(
             f"approval record has no entry for {ENRICHED_APPROVAL_KEY}; the enriched "
@@ -828,9 +834,8 @@ def authorize_enriched_write_mode(
             f"private enriched gold set contains no cases for database {database}"
         )
     expected = build_enriched_fingerprints(database, base_url, model, choices, cases)
-    record = load_enriched_approval_record(approval_path)
+    record = load_enriched_approval_record(approval_path, key=enriched_approval_key(base_url, model))
     verify_approval_record(record, expected)
-    return build_enriched_write_authorizer(cases)
     if "model_case_fingerprints" in record:
         fingerprints = record["model_case_fingerprints"]
         known = {case.fingerprint for case in cases}
@@ -843,3 +848,4 @@ def authorize_enriched_write_mode(
             raise ApprovalError("invalid approved model case fingerprints")
         approved = set(fingerprints)
         cases = [case for case in cases if case.fingerprint in approved]
+    return build_enriched_write_authorizer(cases)
