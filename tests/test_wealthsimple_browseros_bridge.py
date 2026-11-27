@@ -390,5 +390,115 @@ class TestRunScrape(unittest.TestCase):
         self.assertIn(("tabs", {"action": "close", "page": 7}), fake.calls)
 
 
+class TestReadRowsCompatibility(unittest.TestCase):
+    def test_v3_read_rows_inline_spilled_and_legacy_wrapped(self):
+        from unittest.mock import MagicMock
+        from scripts import amex_browseros_bridge as shared
+
+        payload = {
+            "rows": [
+                {
+                    "heading": "September 28, 2026",
+                    "date": "September 28, 2026",
+                    "spans": ["Shop", "Purchase", "Card", "− $1.00 CAD"],
+                }
+            ],
+            "loadMore": False,
+        }
+        payload_json = json.dumps(payload)
+        client = MagicMock()
+
+        def set_result(result):
+            async def call_tool(*args, **kwargs):
+                return result
+
+            client.call_tool.side_effect = call_tool
+
+        with patch.object(shared, "Client", return_value=client):
+            session = shared.FastMCPBrowserOSSession("http://127.0.0.1:9010/mcp")
+
+            # Inline structured value
+            set_result(
+                MagicMock(
+                    data={"changed": False, "page": 7, "value": payload_json},
+                    content=[MagicMock(text=page(TARGET, payload_json))],
+                )
+            )
+            self.assertEqual(asyncio.run(bridge.read_rows(session, 7)), payload)
+
+            # Spilled result.json under DEFAULT_BROWSEROS_DOWNLOAD_DIR
+            with tempfile.TemporaryDirectory() as tool_dir:
+                root = Path(tool_dir)
+                saved = root / "s1" / "result.json"
+                saved.parent.mkdir(parents=True)
+                saved.write_text(
+                    json.dumps(
+                        {
+                            "isError": False,
+                            "structuredContent": {"value": payload_json},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with patch.object(shared, "DEFAULT_BROWSEROS_DOWNLOAD_DIR", root):
+                    set_result(
+                        MagicMock(
+                            data={"writtenToFile": True, "path": str(saved)},
+                            content=[],
+                        )
+                    )
+                    self.assertEqual(asyncio.run(bridge.read_rows(session, 7)), payload)
+
+                    # Truncated JSON in saved file raises
+                    saved.write_text(
+                        json.dumps(
+                            {
+                                "isError": False,
+                                "structuredContent": {"value": '{"rows": ['},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaises(RuntimeError):
+                        asyncio.run(bridge.read_rows(session, 7))
+
+                    # isError=True raises
+                    saved.write_text(
+                        json.dumps(
+                            {
+                                "isError": True,
+                                "structuredContent": {"value": payload_json},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaises(RuntimeError):
+                        asyncio.run(bridge.read_rows(session, 7))
+
+            # None value raises
+            set_result(MagicMock(data={"changed": False}, content=[]))
+            with self.assertRaises(RuntimeError):
+                asyncio.run(bridge.read_rows(session, 7))
+
+            # Missing rows/loadMore raises
+            set_result(MagicMock(data={"value": '{"rows": []}'}, content=[]))
+            with self.assertRaises(RuntimeError):
+                asyncio.run(bridge.read_rows(session, 7))
+
+        # Legacy wrapped string with missing [END raises
+        bad_wrapped = f"[UNTRUSTED_PAGE_CONTENT nonce=1 origin={TARGET}] data\n{payload_json}\nTip: trailing"
+        fake_bad = ScriptedBrowserOS([ACTIVITY])
+
+        async def bad_call(tool_name, arguments):
+            return bad_wrapped
+
+        fake_bad.call = bad_call
+        with self.assertRaises(RuntimeError):
+            asyncio.run(bridge.read_rows(fake_bad, 7))
+
+        # Verify maxChars is 150000
+        self.assertEqual(bridge.EVALUATE_MAX_CHARS, 150_000)
+
+
 if __name__ == "__main__":
     unittest.main()
