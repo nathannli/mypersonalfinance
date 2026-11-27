@@ -20,6 +20,8 @@ graphify-out
 
 .DS_Store
 .pi/
+.claude/skills
+.agents/skills
 .reposcry/
 .zvec-grep/
 
