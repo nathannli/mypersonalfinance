@@ -831,3 +831,15 @@ def authorize_enriched_write_mode(
     record = load_enriched_approval_record(approval_path)
     verify_approval_record(record, expected)
     return build_enriched_write_authorizer(cases)
+    if "model_case_fingerprints" in record:
+        fingerprints = record["model_case_fingerprints"]
+        known = {case.fingerprint for case in cases}
+        if (
+            not isinstance(fingerprints, list)
+            or not fingerprints
+            or any(not isinstance(key, str) or key not in known for key in fingerprints)
+            or len(set(fingerprints)) != len(fingerprints)
+        ):
+            raise ApprovalError("invalid approved model case fingerprints")
+        approved = set(fingerprints)
+        cases = [case for case in cases if case.fingerprint in approved]

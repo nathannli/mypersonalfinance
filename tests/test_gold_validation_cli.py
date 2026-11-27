@@ -239,7 +239,7 @@ class TestModelSelection(RunnerTestCase):
         self.assertEqual(len(wiring.factory_calls), 3)
 
     def test_enriched_run_validates_with_the_enriched_model(self):
-        cases = [object()]
+        cases = [SimpleNamespace(amount_minor_units=900)]
         written = {}
         models = []
 
@@ -261,6 +261,9 @@ class TestModelSelection(RunnerTestCase):
 
             def get_categorization_choices(self):
                 return FIXTURE["taxonomies"]["finance"]
+
+            def select(self, query, args):
+                return []
 
         with (
             patch.object(runner, "Config", fake_config),

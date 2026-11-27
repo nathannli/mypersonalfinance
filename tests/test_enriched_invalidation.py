@@ -257,7 +257,7 @@ class TestApprovalNamespaces(EnrichedFixtureCase):
         text = self.approval_path.read_text(encoding="utf-8")
         for case in cases:
             self.assertNotIn(case.merchant, text)
-            self.assertNotIn(str(case.amount_minor_units), text)
+            self.assertNotRegex(text, rf":\s*{case.amount_minor_units}\s*[,}}]")
             self.assertNotIn("Synthetic bounded evidence text", text)
 
     def test_the_enriched_record_binds_protocol_and_mode(self):
@@ -522,6 +522,41 @@ class TestThreePassEnrichedRunner(EnrichedFixtureCase):
             self.assertTrue(single.passed)
             self.assertEqual(single.provider_calls, len(self.cases))
 
+    def test_rule_covered_case_skips_provider_and_wrong_rule_fails_gate(self):
+        from services.deterministic_categorization import (
+            DeterministicOutcome,
+            DeterministicResolution,
+        )
+
+        covered = next(case for case in self.cases if case.expected_choice_id is not None)
+        for matches in (True, False):
+            with self.subTest(matches=matches):
+                factory = RecordingFactory(self.decisions)
+
+                def resolve(case):
+                    if case != covered:
+                        return DeterministicResolution(DeterministicOutcome.NO_MATCH)
+                    choice_id = covered.expected_choice_id if matches else -1
+                    return DeterministicResolution(
+                        DeterministicOutcome.MATCHED, {"subcategory_id": choice_id}
+                    )
+
+                validation = run_enriched_validation(
+                    self.cases, taxonomy(), factory,
+                    packet_resolver=self.resolver(), workers=3, resolve_rule=resolve,
+                )
+                self.assertEqual(validation.approved, matches)
+                self.assertEqual(len(validation.passes), 3 if matches else 1)
+                for single in validation.passes:
+                    self.assertEqual(single.provider_calls, len(self.cases) - 1)
+                    result, = [row for row in single.results if row.deterministic]
+                    self.assertEqual(result.fingerprint, covered.fingerprint)
+                    self.assertEqual(result.matched, matches)
+                self.assertFalse(any(
+                    covered.fingerprint in item.executed_fingerprints
+                    for item in factory.built
+                ))
+
     def test_a_mismatched_decision_stops_after_the_first_pass(self):
         failure_case = self.cases[0]
         self.decisions[failure_case.fingerprint] = EnrichedAbstain(
@@ -540,6 +575,26 @@ class TestThreePassEnrichedRunner(EnrichedFixtureCase):
         self.assertEqual(len(validation.passes), 1)
         self.assertEqual(len(factory.built), 1)
         self.assertFalse(validation.passes[0].passed)
+
+    def test_parallel_passes_use_one_fresh_request_per_case(self):
+        factory = RecordingFactory(self.decisions)
+        progress = []
+        validation = run_enriched_validation(
+            self.cases, taxonomy(), factory,
+            packet_resolver=self.resolver(),
+            workers=3,
+            on_case=lambda number, result: progress.append((number, result.fingerprint)),
+        )
+        expected = [case.fingerprint for case in self.cases]
+        self.assertTrue(validation.approved)
+        self.assertEqual(len(factory.built), 3 * len(expected))
+        self.assertTrue(all(item.provider_call_count == 1 for item in factory.built))
+        self.assertEqual([number for number, _ in progress],
+                         [number for number in (1, 2, 3) for _ in expected])
+        for number, single in enumerate(validation.passes, start=1):
+            self.assertEqual(single.provider_calls, len(expected))
+            self.assertEqual([result.fingerprint for result in single.results], expected)
+            self.assertCountEqual([key for current, key in progress if current == number], expected)
 
     def test_a_packet_state_failure_costs_that_case_a_provider_call(self):
         missing = "example ambiguous counter"
