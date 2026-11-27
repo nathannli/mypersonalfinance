@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 
+from services.transaction_categorization import normalize_context_text
 from sources.csv.rogers import RogersStatement
 from sources.csv.simplii_visa import SimpliiVisaStatement
 
@@ -132,6 +134,8 @@ def resolve_deterministic_choice(
     cc_category: str | None,
     choices: Sequence[Mapping[str, object]],
     auto_match: Callable[[], tuple[str, str] | None],
+    merchant: str = "",
+    amount: object = None,
 ) -> DeterministicResolution:
     """Resolve one row deterministically, before any packet or LLM work (V1).
 
@@ -141,9 +145,16 @@ def resolve_deterministic_choice(
     mapping does exist and simply cannot be honoured.
     """
     try:
-        reference = resolve_statement_reference(
-            card_type, cc_category, auto_match=auto_match
-        )
+        if (
+            card_type == "amex"
+            and normalize_context_text(merchant) == "github, inc. san francisco"
+            and amount == Decimal("9.00")
+        ):
+            reference = ("Coding", "AI")
+        else:
+            reference = resolve_statement_reference(
+                card_type, cc_category, auto_match=auto_match
+            )
     except ValueError:
         return DeterministicResolution(DeterministicOutcome.INVALID_MAPPING)
 

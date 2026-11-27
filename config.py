@@ -35,6 +35,9 @@ class Config:
             "ENRICHED_TRANSACTION_LLM_MODEL",
             "anthropic/claude-haiku-4-5",
         )
+        self.enriched_transaction_llm_backup_model = os.getenv(
+            "ENRICHED_TRANSACTION_LLM_BACKUP_MODEL", ""
+        ).strip()
         timeout_value = os.getenv("TRANSACTION_LLM_TIMEOUT_SECONDS", "120")
         try:
             self.transaction_llm_timeout_seconds = float(timeout_value)

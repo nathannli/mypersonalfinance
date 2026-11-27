@@ -3,9 +3,8 @@
 Validation runs through the exact production path: the same canonical
 context builder, prompt/request builder, response schema, OpenCodex
 client, response parser, and semantic validator used at runtime. Each
-pass builds a fresh categorizer (empty cache, reset circuit) so a pass
-cannot be satisfied by replaying an earlier pass's cache, and each case
-must cost exactly one real provider request.
+model-routed case requires exactly one fresh provider request. Enriched
+validation can also check deterministic routes without a provider call.
 
 The validator performs no database writes and never sends the expected
 result to the provider.
@@ -16,12 +15,17 @@ import json
 import os
 import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from config import Config
 from services.categorizer_factory import build_categorizer
+from services.deterministic_categorization import (
+    DeterministicOutcome,
+    DeterministicResolution,
+)
 from services.llm_categorizer import (
     EnrichedAbstain,
     EnrichedSelect,
@@ -38,6 +42,7 @@ from services.transaction_llm_approval import (
     approved_packet_for_enriched_case,
     build_enriched_fingerprints,
     build_fingerprints,
+    enriched_approval_key,
 )
 from utils.repo_paths import private_approval_path
 
@@ -82,6 +87,7 @@ class EnrichedCaseResult:
     fingerprint: str
     matched: bool
     detail: str
+    deterministic: bool = False
 
 
 @dataclass
@@ -232,6 +238,8 @@ def run_enriched_pass(
     categorizer_factory: CategorizerFactory,
     *,
     packet_resolver: Callable[[str], object],
+    on_case: Callable[[EnrichedCaseResult], None] | None = None,
+    resolve_rule: Callable[[EnrichedGoldCase], DeterministicResolution] | None = None,
 ) -> EnrichedPassResult:
     """Run one fresh enriched pass through the exact production path (V31).
 
@@ -248,6 +256,22 @@ def run_enriched_pass(
     for case in cases:
         packet = approved_packet_for_enriched_case(case, packet_resolver)
         context = case.build_context(choice_rows)
+        if resolve_rule is not None:
+            rule = resolve_rule(case)
+            if rule.outcome != DeterministicOutcome.NO_MATCH:
+                choice_id = rule.choice["subcategory_id"] if rule.choice else None
+                checked = EnrichedCaseResult(
+                    case.fingerprint,
+                    choice_id is not None
+                    and case.expected_action == ProviderAction.SELECT
+                    and choice_id == case.expected_choice_id,
+                    f"deterministic:{choice_id}",
+                    deterministic=True,
+                )
+                result.results.append(checked)
+                if on_case is not None:
+                    on_case(checked)
+                continue
         calls_before = categorizer.provider_call_count
         cache_hits_before = categorizer.cache_hit_count
 
@@ -271,7 +295,45 @@ def run_enriched_pass(
 
         result.results.append(evaluate_enriched_case(case, execution.decision))
         result.provider_calls += calls_made
+        if on_case is not None:
+            on_case(result.results[-1])
 
+    return result
+
+
+def _run_parallel_enriched_pass(
+    cases: Sequence[EnrichedGoldCase],
+    choices: list[Mapping[str, object]],
+    categorizer_factory: CategorizerFactory,
+    packet_resolver: Callable[[str], object],
+    workers: int,
+    on_case: Callable[[EnrichedCaseResult], None],
+    resolve_rule: Callable[[EnrichedGoldCase], DeterministicResolution] | None,
+) -> EnrichedPassResult:
+    result = EnrichedPassResult()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for start in range(0, len(cases), workers):
+            batch = [
+                pool.submit(
+                    run_enriched_pass,
+                    (case,),
+                    choices,
+                    categorizer_factory,
+                    packet_resolver=packet_resolver,
+                    resolve_rule=resolve_rule,
+                )
+                for case in cases[start : start + workers]
+            ]
+            for future in as_completed(batch):
+                for case_result in future.result().results:
+                    on_case(case_result)
+            for future in batch:
+                single = future.result()
+                result.results.extend(single.results)
+                result.provider_calls += single.provider_calls
+                result.failure = result.failure or single.failure
+            if result.failure is not None:
+                break
     return result
 
 
@@ -281,17 +343,43 @@ def run_enriched_validation(
     categorizer_factory: CategorizerFactory,
     *,
     packet_resolver: Callable[[str], object],
+    workers: int = 1,
+    on_case: Callable[[int, EnrichedCaseResult], None] | None = None,
+    resolve_rule: Callable[[EnrichedGoldCase], DeterministicResolution] | None = None,
 ) -> EnrichedValidationResult:
     """Run consecutive fresh enriched passes, stopping at the first failure."""
     if not cases:
         raise ApprovalError("enriched gold subset contains no cases for this database")
+    if not 1 <= workers <= 3:
+        raise ValueError("workers must be between 1 and 3")
 
     choice_rows = list(choices)
     validation = EnrichedValidationResult()
-    for _ in range(REQUIRED_PASSES):
-        single = run_enriched_pass(
-            cases, choice_rows, categorizer_factory, packet_resolver=packet_resolver
-        )
+    for pass_number in range(1, REQUIRED_PASSES + 1):
+
+        def report(case_result: EnrichedCaseResult) -> None:
+            if on_case is not None:
+                on_case(pass_number, case_result)
+
+        if workers == 1:
+            single = run_enriched_pass(
+                cases,
+                choice_rows,
+                categorizer_factory,
+                packet_resolver=packet_resolver,
+                on_case=report,
+                resolve_rule=resolve_rule,
+            )
+        else:
+            single = _run_parallel_enriched_pass(
+                cases,
+                choice_rows,
+                categorizer_factory,
+                packet_resolver,
+                workers,
+                report,
+                resolve_rule,
+            )
         validation.passes.append(single)
         if not single.passed:
             break
@@ -393,9 +481,26 @@ def write_enriched_approval_record(
             document = dict(existing)
 
     record = build_enriched_fingerprints(database, base_url, model, choices, cases)
+    # A case may authorize model writes only if the model passed it every time.
+    model_cases = {case.fingerprint for case in cases}
+    for single in validation.passes:
+        model_cases.intersection_update(
+            result.fingerprint for result in single.results if not result.deterministic
+        )
+    if not model_cases:
+        raise ApprovalError("no cases passed through the model in all three passes")
+    record["model_case_fingerprints"] = sorted(model_cases)
     record["passes"] = len(validation.passes)
     record["approved_at"] = datetime.now(UTC).isoformat()
+    previous = document.get(ENRICHED_APPROVAL_KEY)
+    if isinstance(previous, Mapping):
+        previous_url, previous_model = previous.get("base_url"), previous.get("model")
+        if isinstance(previous_url, str) and isinstance(previous_model, str):
+            document.setdefault(
+                enriched_approval_key(previous_url, previous_model), previous
+            )
     document[ENRICHED_APPROVAL_KEY] = record
+    document[enriched_approval_key(base_url, model)] = record
 
     _atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     return path
