@@ -195,6 +195,8 @@ class MyFinanceDB(FinanceDB):
             cc_category=cc_category,
             choices=choices,
             auto_match=partial(self.get_auto_match_category, merchant),
+            merchant=merchant,
+            amount=cost,
         )
         if deterministic.outcome is DeterministicOutcome.INVALID_MAPPING:
             return TransactionOutcome(

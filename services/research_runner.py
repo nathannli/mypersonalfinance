@@ -173,6 +173,8 @@ def split_targets(
             cc_category=_optional_text(row.get("cc_category")),
             choices=choices,
             auto_match=lambda merchant=merchant: auto_match(merchant),
+            merchant=merchant,
+            amount=row.get("cost"),
         )
         if resolution.outcome is not DeterministicOutcome.NO_MATCH:
             continue
