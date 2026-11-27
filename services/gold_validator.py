@@ -315,11 +315,14 @@ def _run_parallel_enriched_pass(
         for start in range(0, len(cases), workers):
             batch = [
                 pool.submit(
-                    run_enriched_pass, (case,), choices, categorizer_factory,
+                    run_enriched_pass,
+                    (case,),
+                    choices,
+                    categorizer_factory,
                     packet_resolver=packet_resolver,
                     resolve_rule=resolve_rule,
                 )
-                for case in cases[start:start + workers]
+                for case in cases[start : start + workers]
             ]
             for future in as_completed(batch):
                 for case_result in future.result().results:
@@ -353,19 +356,28 @@ def run_enriched_validation(
     choice_rows = list(choices)
     validation = EnrichedValidationResult()
     for pass_number in range(1, REQUIRED_PASSES + 1):
+
         def report(case_result: EnrichedCaseResult) -> None:
             if on_case is not None:
                 on_case(pass_number, case_result)
 
         if workers == 1:
             single = run_enriched_pass(
-                cases, choice_rows, categorizer_factory,
-                packet_resolver=packet_resolver, on_case=report,
+                cases,
+                choice_rows,
+                categorizer_factory,
+                packet_resolver=packet_resolver,
+                on_case=report,
                 resolve_rule=resolve_rule,
             )
         else:
             single = _run_parallel_enriched_pass(
-                cases, choice_rows, categorizer_factory, packet_resolver, workers, report,
+                cases,
+                choice_rows,
+                categorizer_factory,
+                packet_resolver,
+                workers,
+                report,
                 resolve_rule,
             )
         validation.passes.append(single)
@@ -484,7 +496,9 @@ def write_enriched_approval_record(
     if isinstance(previous, Mapping):
         previous_url, previous_model = previous.get("base_url"), previous.get("model")
         if isinstance(previous_url, str) and isinstance(previous_model, str):
-            document.setdefault(enriched_approval_key(previous_url, previous_model), previous)
+            document.setdefault(
+                enriched_approval_key(previous_url, previous_model), previous
+            )
     document[ENRICHED_APPROVAL_KEY] = record
     document[enriched_approval_key(base_url, model)] = record
 

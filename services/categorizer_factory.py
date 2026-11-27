@@ -131,15 +131,21 @@ def write_authorizers_for(
             except ApprovalError:
                 return WriteAuthorizers(
                     enriched_backup=enriched_write_authorizer_for(
-                        config, database, choices_provider,
-                        packet_resolver=packet_resolver, model=backup,
+                        config,
+                        database,
+                        choices_provider,
+                        packet_resolver=packet_resolver,
+                        model=backup,
                     ),
                     use_backup_only=True,
                 )
             try:
                 fallback = enriched_write_authorizer_for(
-                    config, database, choices_provider,
-                    packet_resolver=packet_resolver, model=backup,
+                    config,
+                    database,
+                    choices_provider,
+                    packet_resolver=packet_resolver,
+                    model=backup,
                 )
             except ApprovalError:
                 fallback = None

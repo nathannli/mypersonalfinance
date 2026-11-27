@@ -253,14 +253,21 @@ Supported card types:
                 and backup_model != config.enriched_transaction_llm_model
             ):
                 if authorizers.use_backup_only:
-                    print(f"Primary model lacks write approval. Using approved backup: {backup_model}")
+                    print(
+                        f"Primary model lacks write approval. Using approved backup: {backup_model}"
+                    )
                     categorizer = build_categorizer(
-                        config, enriched_write_authorizer=authorizers.enriched_backup,
+                        config,
+                        enriched_write_authorizer=authorizers.enriched_backup,
                         model=backup_model,
                     )
-                elif config.transaction_llm_mode == "shadow" or authorizers.enriched_backup:
+                elif (
+                    config.transaction_llm_mode == "shadow"
+                    or authorizers.enriched_backup
+                ):
                     categorizer.enriched_backup = build_categorizer(
-                        config, enriched_write_authorizer=authorizers.enriched_backup,
+                        config,
+                        enriched_write_authorizer=authorizers.enriched_backup,
                         model=backup_model,
                     )
 

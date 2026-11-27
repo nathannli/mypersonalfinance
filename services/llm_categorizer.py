@@ -1007,24 +1007,31 @@ class OpenCodexCategorizer:
         except requests.Timeout:
             self._enriched_availability_failure = True
             self._enriched_retryable_failure(UnresolvedReason.TIMEOUT)
-            return EnrichedExecution(reason=UnresolvedReason.TIMEOUT, failover_eligible=True)
+            return EnrichedExecution(
+                reason=UnresolvedReason.TIMEOUT, failover_eligible=True
+            )
         except requests.ConnectionError:
             self._enriched_availability_failure = True
             self._enriched_immediate_failure(UnresolvedReason.PROVIDER_ERROR)
-            return EnrichedExecution(reason=UnresolvedReason.PROVIDER_ERROR, failover_eligible=True)
+            return EnrichedExecution(
+                reason=UnresolvedReason.PROVIDER_ERROR, failover_eligible=True
+            )
         except Exception:
             return self._enriched_immediate_failure(UnresolvedReason.PROVIDER_ERROR)
 
         status_code = getattr(response, "status_code", None)
         if not isinstance(status_code, int) or status_code < 200 or status_code >= 300:
-            self._enriched_availability_failure = (
-                isinstance(status_code, int)
-                and (status_code == 429 or 500 <= status_code < 600)
+            self._enriched_availability_failure = isinstance(status_code, int) and (
+                status_code == 429 or 500 <= status_code < 600
             )
             if status_code in (400, 404):
                 try:
-                    self._enriched_availability_failure = response.json()["error"]["code"] in (
-                        "model_not_found", "model_unavailable", "model_not_priceable",
+                    self._enriched_availability_failure = response.json()["error"][
+                        "code"
+                    ] in (
+                        "model_not_found",
+                        "model_unavailable",
+                        "model_not_priceable",
                     )
                 except (ValueError, KeyError, TypeError, AttributeError):
                     pass

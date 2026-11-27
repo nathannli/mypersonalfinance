@@ -40,7 +40,10 @@ from services.transaction_llm_approval import (
     load_enriched_gold_cases,
     load_gold_cases,
 )
-from services.transaction_categorization import amount_to_minor_units, normalize_context_text
+from services.transaction_categorization import (
+    amount_to_minor_units,
+    normalize_context_text,
+)
 
 DATABASE_CLASSES = {
     "finance": MyFinanceDB,
@@ -70,7 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--workers", type=int, choices=(1, 2, 3),
+        "--workers",
+        type=int,
+        choices=(1, 2, 3),
         help="Concurrent requests per enriched pass (default: 1)",
     )
     return parser
@@ -104,18 +109,22 @@ def _run_enriched(
         # Gold stores normalized descriptors. Recover the observed spelling for
         # exact-match rules and leave ambiguous spellings on the model route.
         descriptors = defaultdict(set)
-        amounts = sorted({Decimal(case.amount_minor_units).scaleb(-2) for case in cases})
+        amounts = sorted(
+            {Decimal(case.amount_minor_units).scaleb(-2) for case in cases}
+        )
         for merchant, cost in database.select(
             "SELECT DISTINCT merchant, cost FROM expenses WHERE cost = ANY(%s)",
             (amounts,),
         ):
-            descriptors[normalize_context_text(merchant), amount_to_minor_units(cost)].add(merchant)
+            descriptors[
+                normalize_context_text(merchant), amount_to_minor_units(cost)
+            ].add(merchant)
 
         def resolve_rule(case):
             matches = descriptors.get((case.merchant, case.amount_minor_units), ())
             if case.statement_category is not None or len(matches) != 1:
                 return DeterministicResolution(DeterministicOutcome.NO_MATCH)
-            merchant, = matches
+            (merchant,) = matches
             return resolve_deterministic_choice(
                 card_type="amex",
                 cc_category=None,
@@ -124,6 +133,7 @@ def _run_enriched(
                 amount=Decimal(case.amount_minor_units).scaleb(-2),
                 auto_match=lambda: database.get_auto_match_category(merchant),
             )
+
         completed = [0, 0, 0]
 
         def report(pass_number, case_result):
@@ -227,7 +237,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.enriched:
-        return _run_enriched(database_name, config, choices, database, workers=args.workers or 1)
+        return _run_enriched(
+            database_name, config, choices, database, workers=args.workers or 1
+        )
     return _run_legacy(database_name, config, choices)
 
 

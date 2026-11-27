@@ -834,7 +834,9 @@ def authorize_enriched_write_mode(
             f"private enriched gold set contains no cases for database {database}"
         )
     expected = build_enriched_fingerprints(database, base_url, model, choices, cases)
-    record = load_enriched_approval_record(approval_path, key=enriched_approval_key(base_url, model))
+    record = load_enriched_approval_record(
+        approval_path, key=enriched_approval_key(base_url, model)
+    )
     verify_approval_record(record, expected)
     if "model_case_fingerprints" in record:
         fingerprints = record["model_case_fingerprints"]
