@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -10,10 +11,14 @@ from typing import cast
 from config import Config
 from services.categorizer_factory import build_categorizer
 from services.gold_validator import (
+    EnrichedCaseResult,
+    EnrichedPassResult,
+    EnrichedValidationResult,
     production_categorizer_factory,
     run_pass,
     run_validation,
     write_approval_record,
+    write_enriched_approval_record,
 )
 from services.llm_categorizer import (
     SYSTEM_PROMPT,
@@ -31,12 +36,26 @@ from services.transaction_categorization import (
 from services.transaction_llm_approval import (
     REQUIRED_PASSES,
     ApprovalError,
+    EnrichedGoldCase,
+    authorize_enriched_write_mode,
     authorize_write_mode,
+    build_enriched_fingerprints,
     build_fingerprints,
     build_write_authorizer,
+    enriched_approval_key,
+    enriched_gold_subset_hash,
+    load_enriched_approval_record,
+    parse_enriched_gold_cases,
     load_gold_cases,
     parse_gold_cases,
     sha256_hex,
+)
+from test_enriched_llm_categorizer import (
+    LIVE_CHOICES,
+    PARENTS_CHOICES,
+    make_context,
+    make_packet,
+    parents_context,
 )
 from utils.repo_paths import private_approval_path, private_gold_path, repo_root
 
@@ -372,6 +391,239 @@ class TestApprovalRecordGate(unittest.TestCase):
         self.assertEqual(
             record["schema_sha256"], sha256_hex(canonical_response_schema_bytes())
         )
+
+
+class TestFinanceEnrichedApprovalIsPinned(unittest.TestCase):
+    """V1: literals from before parents_finance joined the enriched path."""
+
+    def setUp(self):
+        packet = make_packet()
+        context = replace(
+            make_context(),
+            research_packet_sha256=packet.packet_sha256,
+            research_packet_schema_version=packet.schema_version,
+            research_packet_query_version=packet.query_version,
+        )
+        self.case = EnrichedGoldCase(
+            database="finance",
+            fingerprint=context.fingerprint,
+            merchant=context.merchant,
+            amount_minor_units=context.amount_minor_units,
+            statement_category=None,
+            research_packet_sha256=packet.packet_sha256,
+            packet_schema_version=packet.schema_version,
+            packet_query_version=packet.query_version,
+            expected_action="select",
+            expected_choice_id=11,
+        )
+
+    def test_fingerprints_and_key(self):
+        self.assertEqual(
+            build_enriched_fingerprints(
+                "finance", BASE_URL, MODEL, LIVE_CHOICES, [self.case]
+            ),
+            {
+                "base_url": "http://localhost:10100",
+                "database": "finance",
+                "gold_sha256": "8de3d3a77a4a7ec52201fca65efbfcfb8cc31ba6b5665bef2394e8c1dfab122a",
+                "mode": "write",
+                "model": "exact-model-id",
+                "packet_identity_sha256": "17109dbeabab93029075a5b07aa3f9c500aed01ea4bcd299bda7960708137aaf",
+                "prompt_sha256": "14a6e9f329d50082bf785c3edb4078849e527c25b3505d8535262f90002c9a4f",
+                "protocol": "enriched",
+                "schema_sha256": "49b55f31938de74d7eeefc0d9f7110acbb8653b84828de7a46e59dd72aa26a3a",
+                "taxonomy_sha256": "0bda3691344dfa35460404e2aff8f4425c1c36323244044f0d451c705bdd98db",
+            },
+        )
+        self.assertEqual(
+            enriched_approval_key(BASE_URL, MODEL),
+            "finance:enriched:d8f2ce312974b1923db5d7928a827ce1d4158152d79936d6b09cf0c68761b7f4",
+        )
+
+    def test_writer_keeps_bare_key_and_migrates_the_previous_record(self):
+        passed = EnrichedPassResult(
+            results=[EnrichedCaseResult(self.case.fingerprint, True, "select:11")]
+        )
+        previous = {"base_url": BASE_URL, "model": "older-model"}
+        with tempfile.TemporaryDirectory() as directory:
+            path = write_json(
+                Path(directory), "approval.json", {"finance:enriched": previous}
+            )
+            write_enriched_approval_record(
+                "finance",
+                BASE_URL,
+                MODEL,
+                LIVE_CHOICES,
+                [self.case],
+                EnrichedValidationResult([passed] * REQUIRED_PASSES),
+                approval_path=path,
+            )
+            document = json.loads(path.read_text(encoding="utf-8"))
+
+        current = enriched_approval_key(BASE_URL, MODEL)
+        migrated = enriched_approval_key(BASE_URL, "older-model")
+        self.assertEqual(set(document), {"finance:enriched", current, migrated})
+        self.assertEqual(document[migrated], previous)
+        self.assertEqual(document["finance:enriched"], document[current])
+        self.assertEqual(document[current]["model"], MODEL)
+
+
+class TestParentsEnrichedApproval(unittest.TestCase):
+    """V6/V7/V8: parents approval lives only under its own per-model key."""
+
+    database = "parents_finance"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.directory = Path(self.tmp.name)
+        self.packet = make_packet()
+        self.context = replace(
+            parents_context(),
+            research_packet_sha256=self.packet.packet_sha256,
+            research_packet_schema_version=self.packet.schema_version,
+            research_packet_query_version=self.packet.query_version,
+        )
+        self.case = EnrichedGoldCase(
+            database=self.database,
+            fingerprint=self.context.fingerprint,
+            merchant=self.context.merchant,
+            amount_minor_units=self.context.amount_minor_units,
+            statement_category=None,
+            research_packet_sha256=self.packet.packet_sha256,
+            packet_schema_version=self.packet.schema_version,
+            packet_query_version=self.packet.query_version,
+            expected_action="select",
+            expected_choice_id=2,
+        )
+        self.gold_path = write_json(
+            self.directory, "gold.json", {"cases": [self.case.as_payload()]}
+        )
+        self.key = enriched_approval_key(BASE_URL, MODEL, self.database)
+
+    def passed(self):
+        single = EnrichedPassResult(
+            results=[EnrichedCaseResult(self.case.fingerprint, True, "select:2")]
+        )
+        return EnrichedValidationResult([single] * REQUIRED_PASSES)
+
+    def write(self, path):
+        return write_enriched_approval_record(
+            self.database,
+            BASE_URL,
+            MODEL,
+            PARENTS_CHOICES,
+            [self.case],
+            self.passed(),
+            approval_path=path,
+        )
+
+    def authorize(self, path):
+        return authorize_enriched_write_mode(
+            self.database,
+            BASE_URL,
+            MODEL,
+            lambda: PARENTS_CHOICES,
+            packet_resolver=lambda merchant: SimpleNamespace(packet=self.packet),
+            gold_path=self.gold_path,
+            approval_path=path,
+        )
+
+    def test_key_differs_only_by_the_database_prefix(self):
+        finance = enriched_approval_key(BASE_URL, MODEL)
+
+        self.assertEqual(self.key, f"parents_finance:{finance.split(':', 1)[1]}")
+
+    def test_writing_adds_one_key_and_leaves_finance_records_alone(self):
+        finance = {
+            "finance:enriched": {"base_url": BASE_URL, "model": "older-model"},
+            enriched_approval_key(BASE_URL, MODEL): {"model": MODEL},
+        }
+        path = write_json(self.directory, "approval.json", finance)
+
+        self.write(path)
+        document = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(set(document), {*finance, self.key})
+        for key, record in finance.items():
+            self.assertEqual(document[key], record)
+
+    def test_written_approval_authorizes_only_the_approved_choice(self):
+        path = self.directory / "approval.json"
+        self.write(path)
+
+        authorize = self.authorize(path)
+
+        self.assertTrue(authorize(self.context, self.packet, 2))
+        self.assertFalse(authorize(self.context, self.packet, 1))
+
+    def test_no_other_record_is_ever_used(self):
+        source = self.directory / "source.json"
+        self.write(source)
+        record = json.loads(source.read_text(encoding="utf-8"))[self.key]
+        for key in (
+            "finance:enriched",
+            "parents_finance:enriched",
+            enriched_approval_key(BASE_URL, MODEL),
+        ):
+            with self.subTest(key=key):
+                path = write_json(self.directory, "approval.json", {key: record})
+                with self.assertRaisesRegex(ApprovalError, "no entry"):
+                    self.authorize(path)
+
+    def test_a_parents_record_never_authorizes_finance(self):
+        path = self.directory / "approval.json"
+        self.write(path)
+
+        with self.assertRaisesRegex(ApprovalError, "no entry"):
+            load_enriched_approval_record(
+                path, key=enriched_approval_key(BASE_URL, MODEL)
+            )
+
+    def test_model_case_fingerprints_are_mandatory(self):
+        path = self.directory / "approval.json"
+        self.write(path)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for value in (None, []):
+            with self.subTest(value=value):
+                changed = json.loads(json.dumps(document))
+                if value is None:
+                    del changed[self.key]["model_case_fingerprints"]
+                else:
+                    changed[self.key]["model_case_fingerprints"] = value
+                write_json(self.directory, "approval.json", changed)
+                with self.assertRaisesRegex(ApprovalError, "fingerprints"):
+                    self.authorize(path)
+
+    def test_finance_gold_changes_leave_parents_identity_alone(self):
+        document = {"cases": [self.case.as_payload()]}
+        before = enriched_gold_subset_hash(
+            parse_enriched_gold_cases(document, self.database)
+        )
+        finance = json.loads(
+            (
+                FIXTURE_PATH.parent / "transaction_llm_gold_enriched_synthetic.json"
+            ).read_text(encoding="utf-8")
+        )
+        document["cases"] += finance["cases"]
+
+        self.assertEqual(
+            enriched_gold_subset_hash(
+                parse_enriched_gold_cases(document, self.database)
+            ),
+            before,
+        )
+
+    def test_legacy_validation_and_authorizer_refuse_parents(self):
+        path = write_json(self.directory, "legacy.json", fixture_document())
+        for call in (
+            lambda: load_gold_cases(self.database, path),
+            lambda: authorize_write_mode(
+                self.database, BASE_URL, MODEL, PARENTS_CHOICES, gold_path=path
+            ),
+        ):
+            with self.assertRaisesRegex(ApprovalError, "--enriched"):
+                call()
 
 
 class TestGoldValidator(unittest.TestCase):

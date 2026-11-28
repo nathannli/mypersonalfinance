@@ -13,7 +13,7 @@ from services.research_packets import ResearchPacket
 from services.transaction_categorization import CanonicalContext
 from services.transaction_llm_approval import (
     ApprovalError,
-    ENRICHED_GOLD_DATABASE,
+    SUPPORTED_DATABASES,
     authorize_enriched_write_mode,
     authorize_write_mode,
 )
@@ -42,7 +42,7 @@ def build_categorizer(
     """Build a categorizer bound to the configured OpenCodex proxy.
 
     ``model`` selects the exact requested model ID; ``None`` keeps the
-    unenriched ``TRANSACTION_LLM_MODEL``. The enriched ``finance`` path passes
+    unenriched ``TRANSACTION_LLM_MODEL``. The enriched path passes
     ``ENRICHED_TRANSACTION_LLM_MODEL`` so request bytes, cache identity, gold
     validation, and the approval fingerprint all bind one and the same model
     (V51).
@@ -116,12 +116,11 @@ def write_authorizers_for(
 ) -> WriteAuthorizers:
     """Resolve both write gates for one database, failing closed before mutation.
 
-    Enriched ``finance`` is gated only by packet-bound approval: its unknown rows
-    are answered from frozen packet evidence, so the unenriched approval does not
-    govern them and is not required for the run to start (V33).
-    ``parents_finance`` keeps the unenriched gate unchanged (V2).
+    Both databases are gated only by their own packet-bound approval: unknown
+    rows are answered from frozen packet evidence, so the unenriched approval
+    does not govern them and is not required for the run to start (V33).
     """
-    if database == ENRICHED_GOLD_DATABASE:
+    if database in SUPPORTED_DATABASES:
         backup = getattr(config, "enriched_transaction_llm_backup_model", "")
         if backup and backup != config.enriched_transaction_llm_model:
             try:

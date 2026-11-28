@@ -133,6 +133,38 @@ class TestTransactionLoaderCliLlm(unittest.TestCase):
         self.assertIsInstance(categorizer, OpenCodexCategorizer)
         self.assertEqual(categorizer.provider_call_count, 0)
         self.assertEqual(categorizer.config.mode, "shadow")
+        self.assertEqual(categorizer.config.model, "enriched-model")
+
+    def test_parents_run_binds_its_packet_store_and_backup_model(self):
+        args = argparse.Namespace(
+            type="amex",
+            filepath="statement.csv",
+            folder=None,
+            database="parents_finance",
+        )
+        config = self.config()
+        config.enriched_transaction_llm_backup_model = "backup-model"
+        self.cli._validate_arguments = Mock()
+        self.cli._build_file_list = Mock(return_value=["statement.csv"])
+        self.cli._get_database_instance = Mock(return_value=Mock())
+
+        with (
+            patch("cli.transaction_loader_cli.Config", return_value=config),
+            patch(
+                "cli.transaction_loader_cli.write_authorizers_for",
+                return_value=WriteAuthorizers(),
+            ) as authorizers_for,
+            patch("cli.transaction_loader_cli.TransactionLoader"),
+            patch("cli.transaction_loader_cli.TransactionProcessor") as processor_type,
+        ):
+            processor_type.return_value.process_files.return_value.get_exit_code.return_value = 0
+            self.cli.run(args)
+
+        resolver = authorizers_for.call_args.kwargs["packet_resolver"]
+        self.assertEqual(resolver.keywords, {"database": "parents_finance"})
+        categorizer = processor_type.call_args.args[2]
+        self.assertEqual(categorizer.config.model, "enriched-model")
+        self.assertEqual(categorizer.enriched_backup.config.model, "backup-model")
 
     def test_unapproved_write_mode_aborts_before_any_mutation(self):
         args = argparse.Namespace(

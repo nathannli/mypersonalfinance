@@ -7,6 +7,10 @@ import unittest
 from pathlib import Path
 
 from services import research_runner as rr
+from services.deterministic_categorization import (
+    DeterministicOutcome,
+    resolve_parents_choice,
+)
 from services.research_packets import (
     RESEARCH_EXECUTION_REASONS,
     FetchedPage,
@@ -778,6 +782,100 @@ class TestPostDiscoveryAuth(RunnerTestCase):
         # The earlier success must survive untouched.
         stored = load_packet(results[0].packet_id, root=self.root)
         self.assertIs(stored.status, PacketStatus.COMPLETE)
+
+
+PARENTS_CHOICES = [
+    {"category_id": 1, "category_name": "Groceries"},
+    {"category_id": 2, "category_name": "Eating Out"},
+    {"category_id": 3, "category_name": "Cash"},
+]
+
+
+class TestParentsDeterministicRules(unittest.TestCase):
+    """The one parents rule order: statement category, then auto-match."""
+
+    def resolve(self, cc_category, auto=None, choices=PARENTS_CHOICES):
+        return resolve_parents_choice(
+            cc_category=cc_category, choices=choices, auto_match=lambda: auto
+        )
+
+    def test_statement_category_matches_case_and_nbsp_variants(self):
+        resolution = self.resolve("  eating\xa0OUT ", auto="Groceries")
+
+        self.assertEqual(resolution.outcome, DeterministicOutcome.MATCHED)
+        self.assertEqual(resolution.choice["category_id"], 2)
+
+    def test_blank_or_unknown_statement_category_falls_through(self):
+        for cc_category in (None, "", "   ", "Airlines"):
+            with self.subTest(cc_category=cc_category):
+                resolution = self.resolve(cc_category, auto="groceries")
+                self.assertEqual(resolution.choice["category_id"], 1)
+
+    def test_no_rule_is_no_match(self):
+        self.assertEqual(self.resolve(None).outcome, DeterministicOutcome.NO_MATCH)
+
+    def test_ambiguous_or_stale_mappings_are_invalid(self):
+        duplicated = [*PARENTS_CHOICES, {"category_id": 9, "category_name": "CASH"}]
+
+        def raising():
+            raise ValueError("two substring rules")
+
+        for resolution in (
+            self.resolve("Cash", choices=duplicated),
+            self.resolve(None, auto="Cash", choices=duplicated),
+            self.resolve(None, auto="Removed Category"),
+            resolve_parents_choice(
+                cc_category=None, choices=PARENTS_CHOICES, auto_match=raising
+            ),
+        ):
+            self.assertEqual(resolution.outcome, DeterministicOutcome.INVALID_MAPPING)
+
+
+class TestParentsTargets(unittest.TestCase):
+    def split(self, merchants, rules=None):
+        rules = rules or {}
+        return split_targets(
+            [{"merchant": m, "cc_category": None, "cost": 10.0} for m in merchants],
+            card_type="td_debit",
+            choices=PARENTS_CHOICES,
+            auto_match=rules.get,
+            database="parents_finance",
+        )
+
+    def test_unmatched_cheques_cash_and_drafts_are_held(self):
+        targets, held = self.split(
+            ["CAD DRAFT JANE EXAMPLE", "TD ATM W/D 004", "CHQ#123", "W/DCASH_ X"]
+        )
+
+        self.assertEqual(targets, ())
+        self.assertEqual(
+            held,
+            ("cad draft jane example", "td atm w/d 004", "chq#123", "w/dcash_ x"),
+        )
+
+    def test_a_rule_matched_cash_row_is_neither_target_nor_held(self):
+        self.assertEqual(
+            self.split(["TD ATM W/D 004"], {"TD ATM W/D 004": "Cash"}), ((), ())
+        )
+
+    def test_markers_inside_an_ordinary_token_are_researched(self):
+        targets, held = self.split(["NEW/DEAL SHOP", "XCHQMART"])
+
+        self.assertEqual(held, ())
+        self.assertEqual(
+            [target.normalized_merchant for target in targets],
+            ["new/deal shop", "xchqmart"],
+        )
+
+    def test_unknown_database_is_refused(self):
+        with self.assertRaises(ValueError):
+            split_targets(
+                [{"merchant": "A", "cc_category": None, "cost": 1.0}],
+                card_type="td_debit",
+                choices=PARENTS_CHOICES,
+                auto_match=lambda merchant: None,
+                database="other",
+            )
 
 
 if __name__ == "__main__":

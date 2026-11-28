@@ -19,6 +19,20 @@ RESEARCH_REVIEW_FILENAME = ".transaction-web-research-approvals.json"
 RESEARCH_LOCK_FILENAME = ".transaction-web-research.lock"
 SUGGESTION_FILENAME = ".transaction-category-suggestions.json"
 
+# Research state is separate per database; only the writer lock is shared.
+RESEARCH_ARTIFACTS = {
+    "finance": (
+        PRIVATE_RESEARCH_DIRNAME,
+        RESEARCH_REVIEW_FILENAME,
+        SUGGESTION_FILENAME,
+    ),
+    "parents_finance": (
+        ".transaction-web-research-parents",
+        ".transaction-web-research-approvals-parents.json",
+        ".transaction-category-suggestions-parents.json",
+    ),
+}
+
 
 def repo_root() -> Path:
     """Return the repository root, independent of the process CWD."""

@@ -7,8 +7,10 @@ V10/V16/V17/V18/V19/V20/V23.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
+from dataclasses import replace
 
 from services.llm_categorizer import (
     ENRICHED_PROMPT_VERSION,
@@ -18,6 +20,8 @@ from services.llm_categorizer import (
     EnrichedAbstain,
     EnrichedSelect,
     EnrichedSuggestion,
+    OpenCodexCategorizer,
+    OpenCodexConfig,
     ResponseValidationError,
     allowed_citation_urls,
     build_enriched_request_bytes,
@@ -32,6 +36,7 @@ from services.research_packets import (
     MAX_EVIDENCE_URLS,
     MAX_SUGGESTION_NAME_CHARS,
     MAX_SUGGESTION_RATIONALE_CHARS,
+    CategorySuggestion,
     FetchedPage,
     PacketStatus,
     ResearchPacket,
@@ -183,6 +188,73 @@ def expect_abstain(decision) -> EnrichedAbstain:
     if not isinstance(decision, EnrichedAbstain):
         raise AssertionError(f"expected EnrichedAbstain, got {type(decision).__name__}")
     return decision
+
+
+class TestFinanceIdentityIsPinned(unittest.TestCase):
+    """V1: literals from before parents_finance joined the enriched path.
+
+    A change here invalidates the live finance approval.
+    """
+
+    def setUp(self):
+        self.packet = make_packet()
+        self.context = replace(
+            make_context(),
+            research_packet_sha256=self.packet.packet_sha256,
+            research_packet_schema_version=self.packet.schema_version,
+            research_packet_query_version=self.packet.query_version,
+        )
+
+    def test_prompt_schema_and_request_bytes(self):
+        for payload, digest in (
+            (
+                canonical_enriched_prompt_bytes(),
+                "14a6e9f329d50082bf785c3edb4078849e527c25b3505d8535262f90002c9a4f",
+            ),
+            (
+                canonical_enriched_response_schema_bytes(),
+                "49b55f31938de74d7eeefc0d9f7110acbb8653b84828de7a46e59dd72aa26a3a",
+            ),
+            (
+                build_enriched_request_bytes(
+                    self.context, self.packet, "exact-model-id"
+                ),
+                "afb7c90b8fd1d31f51310630ef98a0b94af74a7e1c9fbda3282957edb177ae60",
+            ),
+        ):
+            self.assertEqual(hashlib.sha256(payload).hexdigest(), digest)
+
+    def test_cache_key(self):
+        categorizer = OpenCodexCategorizer(
+            OpenCodexConfig("http://localhost:10100", "x", model="exact-model-id")
+        )
+
+        self.assertEqual(
+            categorizer._enriched_cache_key(self.context, self.packet),
+            (
+                "2d983eeae6ea449a9768dfb4896a27cbf261b1d2ee9743a67dd68b09f050b964",
+                "dcbc5d36f9e9e59244af4369a2f4e173b5797dd31925e31f8687dcfeff226b12",
+                "transaction-web-research-v1",
+                "merchant-research-v2",
+                "exact-model-id",
+                "transaction-categorization-enriched-v3",
+                "transaction-category-enriched-response-v1",
+                "shadow",
+            ),
+        )
+
+    def test_suggestion_id(self):
+        suggestion = CategorySuggestion(
+            normalized_merchant="acme widgets",
+            category_name="Food",
+            subcategory_name="Snacks",
+            parent_category_id=1,
+            rationale="r",
+            evidence_urls=(CATEGORY_URL,),
+            research_packet_sha256=self.packet.packet_sha256,
+        )
+
+        self.assertEqual(suggestion.suggestion_id, "da4ec2db2ff6e194")
 
 
 class TestEnrichedConstants(unittest.TestCase):
@@ -606,6 +678,122 @@ class TestEnrichedSuggestion(unittest.TestCase):
             )
         )
         self.assertEqual(decision.subcategory_name, "Kitchen Gadgets")
+
+
+PARENTS_CHOICES = [
+    {"category_id": 1, "category_name": "Groceries"},
+    {"category_id": 2, "category_name": "Eating Out"},
+]
+
+
+def parents_context() -> CanonicalContext:
+    return CanonicalContext(
+        database="parents_finance",
+        merchant="acme widgets",
+        amount_minor_units=1234,
+        statement_category=None,
+        allowed_choices=canonicalize_choices("parents_finance", PARENTS_CHOICES),
+    )
+
+
+def parents_suggestion(**overrides) -> dict:
+    payload = {
+        "action": "suggest_new",
+        "category_name": "Gadgets",
+        "rationale": "The evidence describes a widget vendor with no matching choice.",
+        "evidence_urls": [CATEGORY_URL],
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestParentsProtocol(unittest.TestCase):
+    def test_request_uses_the_one_level_prompt_and_schema(self):
+        payload = as_dict(
+            build_enriched_request_payload(parents_context(), make_packet(), "m")
+        )
+        schema = as_dict(as_dict(payload["response_format"])["json_schema"])
+        prompt = as_dict(as_list(payload["messages"])[0])["content"]
+
+        self.assertNotEqual(prompt, ENRICHED_SYSTEM_PROMPT)
+        self.assertNotEqual(schema["name"], ENRICHED_SCHEMA_VERSION)
+        self.assertNotIn("subcategory", json.dumps(schema))
+        self.assertEqual(
+            canonical_enriched_prompt_bytes("parents_finance").decode(), prompt
+        )
+
+    def test_prompt_carries_no_finance_taxonomy_or_precedent(self):
+        prompt = canonical_enriched_prompt_bytes("parents_finance").decode()
+
+        for finance_text in (
+            "subcategory",
+            "parent_category_id",
+            "precedent",
+            "Shopping / Misc",
+            "Coding",
+            "Entertainment / Media",
+            "MSBILL",
+            "Chefs Hall",
+            "Moonshot",
+            "GEORGE",
+            "Well.ca",
+        ):
+            with self.subTest(text=finance_text):
+                self.assertNotIn(finance_text, prompt)
+
+    def test_select_and_suggestion_parse(self):
+        select = expect_select(
+            parse_enriched_provider_content(
+                json.dumps(select_payload(choice_id=2)),
+                parents_context(),
+                make_packet(),
+            )
+        )
+        suggestion = expect_suggestion(
+            parse_enriched_provider_content(
+                json.dumps(parents_suggestion()), parents_context(), make_packet()
+            )
+        )
+
+        self.assertEqual(select.choice_id, 2)
+        self.assertIsNone(suggestion.subcategory_name)
+        self.assertIsNone(suggestion.parent_category_id)
+
+    def test_invalid_responses_are_rejected(self):
+        for payload, reason in (
+            (
+                parents_suggestion(subcategory_name="Widgets"),
+                UnresolvedReason.MALFORMED,
+            ),
+            (parents_suggestion(parent_category_id=None), UnresolvedReason.MALFORMED),
+            (
+                parents_suggestion(category_name=" GROCERIES "),
+                UnresolvedReason.INVALID_CHOICE,
+            ),
+            (select_payload(choice_id=11), UnresolvedReason.INVALID_CHOICE),
+            (
+                parents_suggestion(evidence_urls=["https://other.example/"]),
+                UnresolvedReason.INVALID_CHOICE,
+            ),
+            (parents_suggestion(evidence_urls=[]), UnresolvedReason.MALFORMED),
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(error_reason(payload, parents_context()), reason)
+
+    def test_unknown_database_is_refused(self):
+        with self.assertRaises(ValueError):
+            canonical_enriched_prompt_bytes("other")
+
+    def test_cache_key_binds_the_database_protocol(self):
+        packet = make_packet()
+        categorizer = OpenCodexCategorizer(
+            OpenCodexConfig("http://localhost:10100", "x")
+        )
+
+        key = categorizer._enriched_cache_key(parents_context(), packet)
+
+        self.assertNotIn(ENRICHED_PROMPT_VERSION, key)
+        self.assertNotIn(ENRICHED_SCHEMA_VERSION, key)
 
 
 class TestEnrichedAbstain(unittest.TestCase):

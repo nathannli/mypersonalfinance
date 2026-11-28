@@ -32,9 +32,11 @@ from services.llm_categorizer import (
     EnrichedSuggestion,
     OpenCodexCategorizer,
 )
+from services.manual_etransfers import needs_manual_context
 from services.transaction_categorization import ProviderAction, UnresolvedReason
 from services.transaction_llm_approval import (
     ENRICHED_APPROVAL_KEY,
+    ENRICHED_GOLD_DATABASE,
     REQUIRED_PASSES,
     ApprovalError,
     EnrichedGoldCase,
@@ -124,10 +126,8 @@ def describe_enriched_decision(decision: object) -> str:
     if isinstance(decision, EnrichedSelect):
         return f"{ProviderAction.SELECT}:{decision.choice_id}"
     if isinstance(decision, EnrichedSuggestion):
-        return (
-            f"{ProviderAction.SUGGEST_NEW}:"
-            f"{decision.category_name}/{decision.subcategory_name}"
-        )
+        names = [decision.category_name, decision.subcategory_name]
+        return f"{ProviderAction.SUGGEST_NEW}:{'/'.join(filter(None, names))}"
     if isinstance(decision, EnrichedAbstain):
         return f"{ProviderAction.ABSTAIN}:None"
     return f"invalid:{type(decision).__name__}"
@@ -259,7 +259,10 @@ def run_enriched_pass(
         if resolve_rule is not None:
             rule = resolve_rule(case)
             if rule.outcome != DeterministicOutcome.NO_MATCH:
-                choice_id = rule.choice["subcategory_id"] if rule.choice else None
+                id_field = (
+                    "subcategory_id" if case.database == "finance" else "category_id"
+                )
+                choice_id = rule.choice[id_field] if rule.choice else None
                 checked = EnrichedCaseResult(
                     case.fingerprint,
                     choice_id is not None
@@ -272,6 +275,15 @@ def run_enriched_pass(
                 if on_case is not None:
                     on_case(checked)
                 continue
+        # A held parents row never reaches the provider, even from gold.
+        if case.database == "parents_finance" and needs_manual_context(
+            case.merchant, case.database
+        ):
+            result.failure = (
+                f"case {case.fingerprint[:12]} needs manual context and cannot "
+                "be validated against the model"
+            )
+            return result
         calls_before = categorizer.provider_call_count
         cache_hits_before = categorizer.cache_hit_count
 
@@ -462,8 +474,8 @@ def write_enriched_approval_record(
 ) -> Path:
     """Persist enriched approval after three fresh passing runs (V33).
 
-    Writes only the enriched key: the unenriched ``finance`` and
-    ``parents_finance`` entries in the same document are preserved exactly.
+    Writes only this database's enriched keys: every other entry in the same
+    document is preserved exactly. ``finance`` also keeps its bare key.
     """
     if not validation.approved:
         raise ApprovalError(
@@ -492,15 +504,17 @@ def write_enriched_approval_record(
     record["model_case_fingerprints"] = sorted(model_cases)
     record["passes"] = len(validation.passes)
     record["approved_at"] = datetime.now(UTC).isoformat()
-    previous = document.get(ENRICHED_APPROVAL_KEY)
-    if isinstance(previous, Mapping):
-        previous_url, previous_model = previous.get("base_url"), previous.get("model")
-        if isinstance(previous_url, str) and isinstance(previous_model, str):
-            document.setdefault(
-                enriched_approval_key(previous_url, previous_model), previous
-            )
-    document[ENRICHED_APPROVAL_KEY] = record
-    document[enriched_approval_key(base_url, model)] = record
+    if database == ENRICHED_GOLD_DATABASE:
+        previous = document.get(ENRICHED_APPROVAL_KEY)
+        if isinstance(previous, Mapping):
+            previous_url = previous.get("base_url")
+            previous_model = previous.get("model")
+            if isinstance(previous_url, str) and isinstance(previous_model, str):
+                document.setdefault(
+                    enriched_approval_key(previous_url, previous_model), previous
+                )
+        document[ENRICHED_APPROVAL_KEY] = record
+    document[enriched_approval_key(base_url, model, database)] = record
 
     _atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     return path

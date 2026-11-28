@@ -416,6 +416,67 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestPerDatabaseState(StoreTestCase):
+    """V11/V13: one database never reads or changes the other's state."""
+
+    def finance_bytes(self) -> dict[str, bytes]:
+        return {
+            str(path.relative_to(self.root)): path.read_bytes()
+            for path in sorted(self.root.rglob("*.json"))
+            if "parents" not in str(path.relative_to(self.root))
+        }
+
+    def test_parents_writes_leave_finance_state_untouched(self):
+        packet = make_packet()
+        store_packet(packet, root=self.root)
+        record_review(
+            PacketReviewRecord(
+                packet_id=packet.packet_id,
+                packet_sha256=packet.packet_sha256,
+                status=PacketReviewStatus.APPROVED,
+                reviewed_at=REVIEWED_AT,
+            ),
+            root=self.root,
+        )
+        before = self.finance_bytes()
+
+        parents = "parents_finance"
+        self.assertIsNone(
+            load_packet_if_present(packet.packet_id, root=self.root, database=parents)
+        )
+        newer = make_packet(searched_at="2026-09-18T12:00:00+00:00")
+        store_packet(newer, root=self.root, database=parents)
+        self.assertIsNone(
+            review_record_for(packet.packet_id, root=self.root, database=parents)
+        )
+        record_review(
+            PacketReviewRecord(
+                packet_id=newer.packet_id,
+                packet_sha256=newer.packet_sha256,
+                status=PacketReviewStatus.APPROVED,
+                reviewed_at=REVIEWED_AT,
+            ),
+            root=self.root,
+            database=parents,
+        )
+        # A refresh discards the parents record only.
+        store_packet(packet, root=self.root, database=parents)
+
+        self.assertEqual(self.finance_bytes(), before)
+        self.assertEqual(load_review_records(root=self.root, database=parents), {})
+        self.assertTrue(
+            (self.root / ".transaction-web-research-approvals-parents.json").exists()
+        )
+
+    def test_unknown_database_is_refused(self):
+        for call in (
+            lambda: packet_path_for("a" * 64, root=self.root, database="other"),
+            lambda: review_records_path(root=self.root, database="other"),
+        ):
+            with self.assertRaises(ResearchStoreError):
+                call()
+
+
 class TestRefreshWriteOrdering(StoreTestCase):
     """The superseded record is discarded before the packet is written (V52).
 

@@ -29,8 +29,8 @@ class Config:
             "TRANSACTION_LLM_MODEL",
             "singularity/claude-haiku-5-5",
         )
-        # Enriched finance reads its own model so pinning the enriched default
-        # never changes TRANSACTION_LLM_MODEL or the parents_finance path (V51).
+        # The enriched path reads its own model so pinning the enriched default
+        # never changes TRANSACTION_LLM_MODEL (V51).
         self.enriched_transaction_llm_model = os.getenv(
             "ENRICHED_TRANSACTION_LLM_MODEL",
             "anthropic/claude-haiku-4-5",

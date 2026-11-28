@@ -92,6 +92,12 @@ Usage Examples:
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument(
+        "--database",
+        choices=["finance", "parents_finance"],
+        default="finance",
+        help="Whose packets, decisions and suggestions to review (default: finance)",
+    )
     parser.add_argument("--approve", metavar="PACKET_ID", help="Approve this packet")
     parser.add_argument("--reject", metavar="PACKET_ID", help="Reject this packet")
     parser.add_argument(
@@ -173,15 +179,18 @@ def load_merchant_dates(args: argparse.Namespace) -> dict[str, tuple[date, ...]]
     return {merchant: tuple(sorted(dates)) for merchant, dates in grouped.items()}
 
 
-def resolve_packet_id(value: str) -> str:
+def database_flag(database: str) -> str:
+    return "" if database == "finance" else f" --database {database}"
+
+
+def resolve_packet_id(value: str, database: str = "finance") -> str:
     """Accept either a full packet id or an unambiguous prefix."""
 
     candidate = value.strip()
-    if candidate in list_packet_ids():
+    packet_ids = list_packet_ids(database=database)
+    if candidate in packet_ids:
         return candidate
-    matches = [
-        packet_id for packet_id in list_packet_ids() if packet_id.startswith(candidate)
-    ]
+    matches = [packet_id for packet_id in packet_ids if packet_id.startswith(candidate)]
     if len(matches) == 1:
         return matches[0]
     if not matches:
@@ -211,10 +220,11 @@ def render_packet(
     *,
     index: int | None = None,
     merchant_dates: Mapping[str, tuple[date, ...]] | None = None,
+    database: str = "finance",
 ) -> None:
     """Render one packet's evidence, bounded and without any page dump."""
 
-    record = review_record_for(packet.packet_id)
+    record = review_record_for(packet.packet_id, database=database)
     header = f"merchant: {packet.normalized_merchant}"
     if index is not None:
         header = f"[{index}] {header}"
@@ -257,16 +267,18 @@ def render_packet(
     print()
 
 
-def is_pending(packet: ResearchPacket) -> bool:
+def is_pending(packet: ResearchPacket, database: str = "finance") -> bool:
     """Pending until a record exists that still binds this exact hash (V52)."""
 
-    record = review_record_for(packet.packet_id)
+    record = review_record_for(packet.packet_id, database=database)
     if record is None:
         return True
     return record.packet_sha256 != packet.packet_sha256
 
 
-def collect_packets() -> tuple[list[ResearchPacket], dict[str, int], list[str]]:
+def collect_packets(
+    database: str = "finance",
+) -> tuple[list[ResearchPacket], dict[str, int], list[str]]:
     """Split every stored packet into pending, decided and unreviewable.
 
     Returns the pending packets, the counts of every other state, and any
@@ -274,14 +286,14 @@ def collect_packets() -> tuple[list[ResearchPacket], dict[str, int], list[str]]:
     without a second pass over the store.
     """
 
-    packet_ids = list_packet_ids()
+    packet_ids = list_packet_ids(database=database)
     pending: list[ResearchPacket] = []
     counts = {"stored": len(packet_ids), "approved": 0, "rejected": 0, "failed": 0}
     warnings: list[str] = []
 
     for packet_id in packet_ids:
         try:
-            packet = load_packet(packet_id)
+            packet = load_packet(packet_id, database=database)
         except ResearchPacketError as error:
             # Surface a damaged packet instead of hiding it behind the listing.
             warnings.append(f"WARNING: packet {packet_id} could not be read: {error}")
@@ -290,12 +302,12 @@ def collect_packets() -> tuple[list[ResearchPacket], dict[str, int], list[str]]:
             # V55: failure packets are never reviewable.
             counts["failed"] += 1
             continue
-        if is_pending(packet):
+        if is_pending(packet, database):
             # A record that no longer binds this exact hash is pending too, so
             # a packet whose approval was superseded is never reported approved.
             pending.append(packet)
             continue
-        record = review_record_for(packet_id)
+        record = review_record_for(packet_id, database=database)
         if record is not None and record.status is PacketReviewStatus.APPROVED:
             counts["approved"] += 1
         else:
@@ -314,13 +326,16 @@ def print_summary(counts: dict[str, int], broken: int) -> None:
     print(RECORD_SEPARATOR)
 
 
-def list_packets(merchant_dates: Mapping[str, tuple[date, ...]] | None = None) -> int:
-    packet_ids = list_packet_ids()
+def list_packets(
+    merchant_dates: Mapping[str, tuple[date, ...]] | None = None,
+    database: str = "finance",
+) -> int:
+    packet_ids = list_packet_ids(database=database)
     if not packet_ids:
         print("No research packets found. Run research-transaction-merchants.py first.")
         return 0
 
-    pending, counts, warnings = collect_packets()
+    pending, counts, warnings = collect_packets(database)
     for warning in warnings:
         print(warning)
     counts["pending"] = len(pending)
@@ -332,13 +347,14 @@ def list_packets(merchant_dates: Mapping[str, tuple[date, ...]] | None = None) -
 
     print(f"\n{len(pending)} packet(s) awaiting review:\n")
     for index, packet in enumerate(pending, start=1):
-        render_packet(packet, index=index, merchant_dates=merchant_dates)
+        render_packet(
+            packet, index=index, merchant_dates=merchant_dates, database=database
+        )
+    command = f"python review-transaction-research.py{database_flag(database)}"
     print(
-        "Walk them one at a time with: "
-        "python review-transaction-research.py --interactive\n"
-        "Approve with: python review-transaction-research.py --approve <packet_id>\n"
-        "Reject with:  python review-transaction-research.py --reject <packet_id> "
-        '--reason "..."'
+        f"Walk them one at a time with: {command} --interactive\n"
+        f"Approve with: {command} --approve <packet_id>\n"
+        f'Reject with:  {command} --reject <packet_id> --reason "..."'
     )
     return 0
 
@@ -354,6 +370,7 @@ def prompt(message: str) -> str:
 
 def review_interactively(
     merchant_dates: Mapping[str, tuple[date, ...]] | None = None,
+    database: str = "finance",
 ) -> int:
     """Walk the pending packets one at a time, recording a decision per packet.
 
@@ -363,12 +380,12 @@ def review_interactively(
     same records.
     """
 
-    packet_ids = list_packet_ids()
+    packet_ids = list_packet_ids(database=database)
     if not packet_ids:
         print("No research packets found. Run research-transaction-merchants.py first.")
         return 0
 
-    pending, counts, warnings = collect_packets()
+    pending, counts, warnings = collect_packets(database)
     for warning in warnings:
         print(warning)
     counts["pending"] = len(pending)
@@ -386,14 +403,18 @@ def review_interactively(
     decided = 0
     for index, packet in enumerate(pending, start=1):
         print(RECORD_SEPARATOR)
-        render_packet(packet, index=index, merchant_dates=merchant_dates)
+        render_packet(
+            packet, index=index, merchant_dates=merchant_dates, database=database
+        )
 
         while True:
             answer = prompt(
                 f"[{index}/{len(pending)}] (a)pprove / (r)eject / (s)kip / (q)uit? "
             ).lower()
             if answer in {"a", "approve"}:
-                code = decide(packet.packet_id, PacketReviewStatus.APPROVED, None)
+                code = decide(
+                    packet.packet_id, PacketReviewStatus.APPROVED, None, database
+                )
                 decided += 1 if code == 0 else 0
                 break
             if answer in {"r", "reject"}:
@@ -402,7 +423,12 @@ def review_interactively(
                     # An empty reason would write a rejection nobody can act on.
                     print("A rejection needs a reason. Try again, or s to skip.")
                     continue
-                code = decide(packet.packet_id, PacketReviewStatus.REJECTED, reason)
+                code = decide(
+                    packet.packet_id,
+                    PacketReviewStatus.REJECTED,
+                    reason,
+                    database,
+                )
                 decided += 1 if code == 0 else 0
                 break
             if answer in {"s", "skip"}:
@@ -421,7 +447,7 @@ def review_interactively(
     return 0
 
 
-def list_suggestions() -> int:
+def list_suggestions(database: str = "finance") -> int:
     """Render the grouped suggestion artifact, the review half of `suggest_new`.
 
     `suggest_new` is the one action that persists something, so the artifact it
@@ -431,7 +457,7 @@ def list_suggestions() -> int:
     """
 
     try:
-        grouped = load_suggestions()
+        grouped = load_suggestions(database=database)
     except ResearchPacketError as error:
         print(f"ERROR: {error}")
         return 1
@@ -449,7 +475,8 @@ def list_suggestions() -> int:
         for suggestion in suggestions:
             print(f"  - {suggestion.suggestion_id}")
             print(f"      category   : {suggestion.category_name}")
-            print(f"      subcategory: {suggestion.subcategory_name}")
+            if suggestion.subcategory_name is not None:
+                print(f"      subcategory: {suggestion.subcategory_name}")
             if suggestion.parent_category_id is not None:
                 print(f"      parent id  : {suggestion.parent_category_id}")
             if suggestion.rationale:
@@ -465,10 +492,10 @@ def list_suggestions() -> int:
     return 0
 
 
-def load_for_review(packet_id: str) -> ResearchPacket:
+def load_for_review(packet_id: str, database: str = "finance") -> ResearchPacket:
     """Load a packet that is actually eligible for a decision."""
 
-    packet = load_packet(packet_id)
+    packet = load_packet(packet_id, database=database)
     if packet.status is not PacketStatus.COMPLETE:
         raise ValueError(
             "this is a failure packet, and failure packets are never reviewable (V55)"
@@ -482,10 +509,15 @@ def load_for_review(packet_id: str) -> ResearchPacket:
     return packet
 
 
-def decide(packet_id: str, status: PacketReviewStatus, reason: str | None) -> int:
+def decide(
+    packet_id: str,
+    status: PacketReviewStatus,
+    reason: str | None,
+    database: str = "finance",
+) -> int:
     try:
-        resolved = resolve_packet_id(packet_id)
-        packet = load_for_review(resolved)
+        resolved = resolve_packet_id(packet_id, database)
+        packet = load_for_review(resolved, database)
         record_review(
             PacketReviewRecord(
                 packet_id=packet.packet_id,
@@ -493,7 +525,8 @@ def decide(packet_id: str, status: PacketReviewStatus, reason: str | None) -> in
                 status=status,
                 reviewed_at=utc_now(),
                 reason=reason,
-            )
+            ),
+            database=database,
         )
     except (ResearchPacketError, ValueError) as error:
         print(f"ERROR: {error}")
@@ -527,7 +560,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("ERROR: --interactive cannot be combined with a single-packet decision")
         return 1
     if args.suggestions:
-        return list_suggestions()
+        return list_suggestions(args.database)
 
     try:
         merchant_dates = load_merchant_dates(args)
@@ -536,18 +569,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     if args.interactive:
-        return review_interactively(merchant_dates)
+        return review_interactively(merchant_dates, args.database)
     if args.approve:
-        return decide(args.approve, PacketReviewStatus.APPROVED, None)
+        return decide(args.approve, PacketReviewStatus.APPROVED, None, args.database)
     if args.reject:
         if not args.reason or not args.reason.strip():
             print("ERROR: --reject requires a --reason")
             return 1
-        return decide(args.reject, PacketReviewStatus.REJECTED, args.reason.strip())
+        return decide(
+            args.reject,
+            PacketReviewStatus.REJECTED,
+            args.reason.strip(),
+            args.database,
+        )
     if args.list_only or not sys.stdin.isatty():
         # A piped or redirected stdin cannot answer, so it gets the listing.
-        return list_packets(merchant_dates)
-    return review_interactively(merchant_dates)
+        return list_packets(merchant_dates, args.database)
+    return review_interactively(merchant_dates, args.database)
 
 
 if __name__ == "__main__":

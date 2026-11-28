@@ -1,9 +1,10 @@
-"""Statement e-transfers that need a transaction-specific answer from the user."""
+"""Statement rows that need a transaction-specific answer from the user."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -17,8 +18,23 @@ from services.transaction_categorization import (
 MANUAL_CONTEXT_PREFIXES: tuple[str, ...] = ("interac e-transfer:",)
 
 
-def needs_manual_context(normalized_merchant: str) -> bool:
-    return normalized_merchant.startswith(MANUAL_CONTEXT_PREFIXES)
+# Transfers, cheques, drafts and cash in parents bank descriptors. `chq` and
+# `w/d` must start a token, so an ordinary merchant name containing them passes.
+PARENTS_MANUAL_CONTEXT = re.compile(
+    r"e-tfr|e-transfer|tfr-to|tfr-fr|tfr to |cash with|cad draft|draft #"
+    r"|(?<![a-z0-9])(?:chq|w/d)"
+)
+
+
+def needs_manual_context(normalized_merchant: str, database: str = "finance") -> bool:
+    if database == "finance":
+        return normalized_merchant.startswith(MANUAL_CONTEXT_PREFIXES)
+    if database == "parents_finance":
+        return (
+            normalized_merchant.startswith(MANUAL_CONTEXT_PREFIXES)
+            or PARENTS_MANUAL_CONTEXT.search(normalized_merchant) is not None
+        )
+    raise ValueError(f"Unsupported database: {database}")
 
 
 @dataclass(frozen=True)
@@ -51,13 +67,14 @@ class ManualTransfer:
 
 def statement_transfers(
     rows: Iterable[Mapping[str, object]],
+    database: str = "finance",
 ) -> tuple[ManualTransfer, ...]:
     """Keep separate transactions, deduplicating overlapping statement exports."""
     transfers: dict[str, ManualTransfer] = {}
     for row in rows:
         merchant = row.get("merchant")
         if not isinstance(merchant, str) or not needs_manual_context(
-            normalize_context_text(merchant)
+            normalize_context_text(merchant), database
         ):
             continue
         transaction_date = row.get("date")
