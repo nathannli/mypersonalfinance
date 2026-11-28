@@ -26,7 +26,6 @@ class PostgresDB(ABC):
         self.database_name = database_name
         self.uri = f"{self.config.postgres_connection_string}/{self.database_name}"
         if self.config.debug:
-            print(f"{self.uri=}")
             print(f"{self.database_name=}")
 
     def connect(self) -> psycopg.Connection:
