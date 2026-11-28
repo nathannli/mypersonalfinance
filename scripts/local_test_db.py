@@ -23,7 +23,7 @@ import time
 
 import psycopg
 from dotenv import dotenv_values
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from utils.repo_paths import repo_root
 
@@ -51,6 +51,13 @@ def prod_uri() -> str:
     return require_remote_source(
         dotenv_values(repo_root() / ".env").get("POSTGRES_CONNECTION_STRING")
     )
+
+
+def split_password(uri: str, database: str) -> tuple[str, str | None]:
+    """A conninfo for `database` without the password, and the password apart."""
+    params = conninfo_to_dict(uri)
+    password = params.pop("password", None)
+    return make_conninfo(**{**params, "dbname": database}), password
 
 
 def run(*args: str, **kwargs) -> subprocess.CompletedProcess:
@@ -151,21 +158,26 @@ def up() -> int:
             stdin=ddl,
         )
 
-    env = {**os.environ, "PGURI": source}
     for database in DATABASES:
         print(f"Copying {database}...")
-        # PGURI travels in the environment, never in argv or output.
+        conninfo, password = split_password(source, database)
+        # The password travels as PGPASSWORD, never in any argv or output.
+        env = {**os.environ, "SOURCE_DB": conninfo}
+        if password is not None:
+            env["PGPASSWORD"] = password
         run(
             "docker",
             "exec",
             "-e",
-            "PGURI",
+            "SOURCE_DB",
+            "-e",
+            "PGPASSWORD",
             "-e",
             f"DB={database}",
             CONTAINER,
             "bash",
             "-c",
-            'set -o pipefail; pg_dump --format=custom --no-owner --no-privileges "$PGURI/$DB"'
+            'set -o pipefail; pg_dump --format=custom --no-owner --no-privileges -d "$SOURCE_DB"'
             ' | pg_restore -U postgres -d "$DB" --no-owner --no-privileges --exit-on-error',
             env=env,
         )
