@@ -3,7 +3,9 @@
 `up` starts a `postgres:18` container (prod runs 18), streams `pg_dump` of both
 prod databases straight into `pg_restore` inside it (no dump file on disk),
 then checks per-table row counts against prod. `down` removes the container
-and, with it, the copy. Prod is only read: `pg_dump` and `SELECT count(*)`.
+but leaves its Docker volume, and so the copy, on disk. `docker-clean` removes
+this script's container together with that volume; it touches no other
+container or volume. Prod is only read: `pg_dump` and `SELECT count(*)`.
 
 Point the app at the copy for one shell with the export line `up` prints:
 `load_dotenv` never overrides an exported variable, so `.env` stays as is.
@@ -11,6 +13,7 @@ Point the app at the copy for one shell with the export line `up` prints:
 Usage:
     uv run --frozen python scripts/local_test_db.py up
     uv run --frozen python scripts/local_test_db.py down
+    uv run --frozen python scripts/local_test_db.py docker-clean
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ import time
 
 import psycopg
 from dotenv import dotenv_values
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from utils.repo_paths import repo_root
 
@@ -51,6 +54,13 @@ def prod_uri() -> str:
     return require_remote_source(
         dotenv_values(repo_root() / ".env").get("POSTGRES_CONNECTION_STRING")
     )
+
+
+def split_password(uri: str, database: str) -> tuple[str, str | None]:
+    """A conninfo for `database` without the password, and the password apart."""
+    params = conninfo_to_dict(uri)
+    password = params.pop("password", None)
+    return make_conninfo(**{**params, "dbname": database}), password
 
 
 def run(*args: str, **kwargs) -> subprocess.CompletedProcess:
@@ -121,7 +131,7 @@ def up() -> int:
     source = prod_uri()
     ensure_docker()
     if container_exists():
-        raise SystemExit(f"{CONTAINER} already exists; run down first")
+        raise SystemExit(f"{CONTAINER} already exists; run docker-clean first")
     run(
         "docker",
         "run",
@@ -151,21 +161,26 @@ def up() -> int:
             stdin=ddl,
         )
 
-    env = {**os.environ, "PGURI": source}
     for database in DATABASES:
         print(f"Copying {database}...")
-        # PGURI travels in the environment, never in argv or output.
+        conninfo, password = split_password(source, database)
+        # The password travels as PGPASSWORD, never in any argv or output.
+        env = {**os.environ, "SOURCE_DB": conninfo}
+        if password is not None:
+            env["PGPASSWORD"] = password
         run(
             "docker",
             "exec",
             "-e",
-            "PGURI",
+            "SOURCE_DB",
+            "-e",
+            "PGPASSWORD",
             "-e",
             f"DB={database}",
             CONTAINER,
             "bash",
             "-c",
-            'set -o pipefail; pg_dump --format=custom --no-owner --no-privileges "$PGURI/$DB"'
+            'set -o pipefail; pg_dump --format=custom --no-owner --no-privileges -d "$SOURCE_DB"'
             ' | pg_restore -U postgres -d "$DB" --no-owner --no-privileges --exit-on-error',
             env=env,
         )
@@ -186,25 +201,31 @@ def up() -> int:
 
     print("\nUse the copy in this shell with:")
     print(f"  export POSTGRES_CONNECTION_STRING={LOCAL_URI}")
-    print("Remove it with: uv run --frozen python scripts/local_test_db.py down")
+    print(
+        "Remove it, data included, with: "
+        "uv run --frozen python scripts/local_test_db.py docker-clean"
+    )
     return 0
 
 
-def down() -> int:
+def down(remove_volume: bool = False) -> int:
     ensure_docker()
     if not container_exists():
         print(f"{CONTAINER} does not exist")
         return 0
-    run("docker", "rm", "-f", CONTAINER, stdout=subprocess.DEVNULL)
+    flags = ["-f", "-v"] if remove_volume else ["-f"]
+    run("docker", "rm", *flags, CONTAINER, stdout=subprocess.DEVNULL)
     print(f"Removed {CONTAINER}")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=["up", "down"])
+    parser.add_argument("command", choices=["up", "down", "docker-clean"])
     args = parser.parse_args(argv)
-    return up() if args.command == "up" else down()
+    if args.command == "up":
+        return up()
+    return down(remove_volume=args.command == "docker-clean")
 
 
 if __name__ == "__main__":
