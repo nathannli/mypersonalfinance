@@ -131,7 +131,7 @@ def up() -> int:
     source = prod_uri()
     ensure_docker()
     if container_exists():
-        raise SystemExit(f"{CONTAINER} already exists; run down first")
+        raise SystemExit(f"{CONTAINER} already exists; run docker-clean first")
     run(
         "docker",
         "run",
