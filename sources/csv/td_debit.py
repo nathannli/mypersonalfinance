@@ -31,7 +31,13 @@ class TdDebitStatement(FileBasedCardStatement):
             Exception: If the file cannot be read or processed
         """
         # Read the CSV file without headers (TD CSVs have no header row)
-        df = pl.read_csv(source=self.file_path, has_header=False)
+        # An export can leave either amount column empty on every row, which
+        # polars would otherwise infer as text.
+        df = pl.read_csv(
+            source=self.file_path,
+            has_header=False,
+            schema_overrides={"column_3": pl.Float64, "column_4": pl.Float64},
+        )
 
         # Rename columns to normalized names
         df1 = df.rename(
