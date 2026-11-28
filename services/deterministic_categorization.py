@@ -165,3 +165,43 @@ def resolve_deterministic_choice(
     if choice is None:
         return DeterministicResolution(DeterministicOutcome.INVALID_MAPPING)
     return DeterministicResolution(DeterministicOutcome.MATCHED, choice)
+
+
+def resolve_parents_choice(
+    *,
+    cc_category: str | None,
+    choices: Sequence[Mapping[str, object]],
+    auto_match: Callable[[], str | None],
+) -> DeterministicResolution:
+    """The one-level ``parents_finance`` order: statement category, then rules.
+
+    ``auto_match`` is the caller's exact-then-substring rule lookup; it raises
+    ``ValueError`` when the rules themselves are ambiguous.
+    """
+
+    def named(name: str) -> list[Mapping[str, object]]:
+        key = normalize_context_text(name)
+        return [
+            choice
+            for choice in choices
+            if normalize_context_text(str(choice["category_name"])) == key
+        ]
+
+    invalid = DeterministicResolution(DeterministicOutcome.INVALID_MAPPING)
+    if cc_category and normalize_context_text(cc_category):
+        matches = named(cc_category)
+        if len(matches) > 1:
+            return invalid
+        if matches:
+            return DeterministicResolution(DeterministicOutcome.MATCHED, matches[0])
+
+    try:
+        name = auto_match()
+    except ValueError:
+        return invalid
+    if name is None:
+        return DeterministicResolution(DeterministicOutcome.NO_MATCH)
+    matches = named(name)
+    if len(matches) != 1:
+        return invalid
+    return DeterministicResolution(DeterministicOutcome.MATCHED, matches[0])

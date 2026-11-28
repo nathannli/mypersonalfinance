@@ -50,7 +50,8 @@ REQUIRED_PASSES = 3
 
 SUPPORTED_DATABASES = ("finance", "parents_finance")
 
-# Enrichment applies to `finance` only (V2).
+# `finance` is the default enriched database and the only one whose approval
+# also lives under a bare, model-independent key.
 ENRICHED_GOLD_DATABASE = "finance"
 
 # One fixed exact case schema: every enriched case carries every field and the
@@ -168,10 +169,11 @@ def gold_subset_hash(cases: Iterable[GoldCase]) -> str:
 class EnrichedGoldCase:
     """One user-approved expectation for a packet-bound canonical context.
 
-    Enrichment applies to `finance` only (V2), so every enriched case binds an
-    exact research packet hash plus that packet's schema and query versions
-    (V30). A finance case with no packet identity is a pre-packet case and is
-    rejected rather than reused (V46).
+    Every enriched case binds an exact research packet hash plus that packet's
+    schema and query versions (V30). A case with no packet identity is a
+    pre-packet case and is rejected rather than reused (V46). `parents_finance`
+    cases leave the subcategory and parent category null: its taxonomy is one
+    level.
     """
 
     database: str
@@ -231,9 +233,9 @@ class EnrichedGoldCase:
             self.expected_category_name or ""
         ):
             return False
-        if normalize_context_text(decision.subcategory_name) != normalize_context_text(
-            self.expected_subcategory_name or ""
-        ):
+        if normalize_context_text(
+            decision.subcategory_name or ""
+        ) != normalize_context_text(self.expected_subcategory_name or ""):
             return False
         # Citations are an unordered evidence set; membership must match
         # exactly. Both sides are already validated for bounds and uniqueness.
@@ -320,11 +322,8 @@ def parse_enriched_gold_cases(document: Any, database: str) -> list[EnrichedGold
     database. Packet eligibility is checked separately by
     :func:`load_enriched_gold_cases`.
     """
-    if database != ENRICHED_GOLD_DATABASE:
-        raise ApprovalError(
-            f"enriched gold cases exist only for the {ENRICHED_GOLD_DATABASE} "
-            f"database; {database} stays unenriched"
-        )
+    if database not in SUPPORTED_DATABASES:
+        raise ApprovalError(f"no enriched gold cases for database {database}")
     if not isinstance(document, Mapping):
         raise ApprovalError("gold set must be a JSON object")
     raw_cases = document.get("cases")
@@ -340,7 +339,7 @@ def parse_enriched_gold_cases(document: Any, database: str) -> list[EnrichedGold
             continue
         if "research_packet_sha256" not in raw:
             raise ApprovalError(
-                "finance gold case must bind a research packet; cases whose "
+                f"{database} gold case must bind a research packet; cases whose "
                 "fingerprint predates packet identity are rejected and must be "
                 "regenerated"
             )
@@ -427,9 +426,19 @@ def parse_enriched_gold_cases(document: Any, database: str) -> list[EnrichedGold
             category_name = _gold_name(
                 raw.get("expected_category_name"), "expected_category_name"
             )
-            subcategory_name = _gold_name(
-                raw.get("expected_subcategory_name"), "expected_subcategory_name"
-            )
+            if database == "parents_finance":
+                for field in (
+                    "expected_subcategory_name",
+                    "expected_parent_category_id",
+                ):
+                    if raw.get(field) is not None:
+                        raise ApprovalError(
+                            f"parents_finance gold case must not carry {field}"
+                        )
+            else:
+                subcategory_name = _gold_name(
+                    raw.get("expected_subcategory_name"), "expected_subcategory_name"
+                )
 
         cases.append(
             EnrichedGoldCase(
@@ -621,6 +630,12 @@ def parse_gold_cases(document: Any, database: str) -> list[GoldCase]:
 
 
 def load_gold_cases(database: str, path: Path | None = None) -> list[GoldCase]:
+    if database == "parents_finance":
+        # Its private cases are packet-bound; the legacy reader would accept
+        # them without checking their packets.
+        raise ApprovalError(
+            "parents_finance has no legacy validation or approval; use --enriched"
+        )
     gold_path = path or private_gold_path()
     if not gold_path.exists():
         raise ApprovalError(
@@ -746,15 +761,18 @@ def build_enriched_fingerprints(
         "mode": ENRICHED_AUTHORIZED_MODE,
         "model": model,
         "packet_identity_sha256": enriched_packet_identity_hash(case_list),
-        "prompt_sha256": sha256_hex(canonical_enriched_prompt_bytes()),
+        "prompt_sha256": sha256_hex(canonical_enriched_prompt_bytes(database)),
         "protocol": ENRICHED_PROTOCOL,
-        "schema_sha256": sha256_hex(canonical_enriched_response_schema_bytes()),
+        "schema_sha256": sha256_hex(canonical_enriched_response_schema_bytes(database)),
         "taxonomy_sha256": taxonomy_hash(database, choices),
     }
 
 
-def enriched_approval_key(base_url: str, model: str) -> str:
-    return f"{ENRICHED_APPROVAL_KEY}:{sha256_hex(canonical_json_bytes([normalize_base_url(base_url), model]))}"
+def enriched_approval_key(
+    base_url: str, model: str, database: str = ENRICHED_GOLD_DATABASE
+) -> str:
+    identity = canonical_json_bytes([normalize_base_url(base_url), model])
+    return f"{database}:{ENRICHED_PROTOCOL}:{sha256_hex(identity)}"
 
 
 def load_enriched_approval_record(
@@ -772,11 +790,15 @@ def load_enriched_approval_record(
         raise ApprovalError("approval record could not be read") from exc
     if not isinstance(document, Mapping):
         raise ApprovalError("approval record must be a JSON object")
-    record = document.get(key, document.get(ENRICHED_APPROVAL_KEY))
+    database = key.split(":", 1)[0]
+    record = document.get(key)
+    # Only finance has records older than the per-model key to fall back to.
+    if database == ENRICHED_GOLD_DATABASE:
+        record = document.get(key, document.get(ENRICHED_APPROVAL_KEY))
     if not isinstance(record, Mapping):
         raise ApprovalError(
-            f"approval record has no entry for {ENRICHED_APPROVAL_KEY}; the enriched "
-            "gate needs its own approval and never reuses the unenriched one"
+            f"approval record has no entry for {database}:{ENRICHED_PROTOCOL}; the "
+            "enriched gate needs its own approval and never reuses the unenriched one"
         )
     return record
 
@@ -821,10 +843,8 @@ def authorize_enriched_write_mode(
     approval_path: Path | None = None,
 ):
     """Return the enriched write authorizer, or raise before any DB mutation."""
-    if database != ENRICHED_GOLD_DATABASE:
-        raise ApprovalError(
-            f"enriched write approval exists only for {ENRICHED_GOLD_DATABASE}"
-        )
+    if database not in SUPPORTED_DATABASES:
+        raise ApprovalError(f"no enriched write approval for database {database}")
     choices = list(choices_provider())
     cases = load_enriched_gold_cases(
         database, choices, packet_resolver=packet_resolver, path=gold_path
@@ -835,9 +855,11 @@ def authorize_enriched_write_mode(
         )
     expected = build_enriched_fingerprints(database, base_url, model, choices, cases)
     record = load_enriched_approval_record(
-        approval_path, key=enriched_approval_key(base_url, model)
+        approval_path, key=enriched_approval_key(base_url, model, database)
     )
     verify_approval_record(record, expected)
+    if database != ENRICHED_GOLD_DATABASE and "model_case_fingerprints" not in record:
+        raise ApprovalError("approval record lacks model case fingerprints")
     if "model_case_fingerprints" in record:
         fingerprints = record["model_case_fingerprints"]
         known = {case.fingerprint for case in cases}

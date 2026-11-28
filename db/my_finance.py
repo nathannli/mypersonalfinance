@@ -18,20 +18,14 @@ from services.enriched_categorization import (
     resolve_approved_packet,
 )
 from services.llm_categorizer import (
-    EnrichedAbstain,
-    EnrichedDecision,
-    EnrichedSelect,
-    EnrichedSuggestion,
     OpenCodexCategorizer,
 )
 from services.manual_etransfers import needs_manual_context
 from services.research_packets import (
     CategorySuggestion,
-    ResearchPacket,
     record_suggestion,
 )
 from services.transaction_categorization import (
-    CanonicalContext,
     Resolution,
     TransactionOutcome,
     TransactionStatus,
@@ -42,6 +36,7 @@ from services.transaction_categorization import (
 
 
 class MyFinanceDB(FinanceDB):
+    choice_id_field = "subcategory_id"
     reimbursement_subcategory_id = 14
 
     # Taxonomy snapshot: read once per run (V43). Class-level None default
@@ -276,72 +271,6 @@ class MyFinanceDB(FinanceDB):
             packet,
             execution.decision,
             execution.source or categorizer,
-        )
-
-    def _apply_enriched_decision(
-        self,
-        date: date,
-        merchant: str,
-        cost: float,
-        choices: list[dict[str, object]],
-        context: CanonicalContext,
-        packet: ResearchPacket,
-        decision: EnrichedDecision,
-        categorizer: OpenCodexCategorizer | None = None,
-    ) -> TransactionOutcome:
-        """Map one validated enriched decision to exactly one outcome (V25)."""
-        if isinstance(decision, EnrichedAbstain):
-            return TransactionOutcome(
-                TransactionStatus.UNRESOLVED,
-                Resolution.LLM,
-                UnresolvedReason.ABSTAINED,
-            )
-
-        if isinstance(decision, EnrichedSuggestion):
-            # V19/V21/V22: review-only. The proposal is persisted before the
-            # outcome is reported, so a row is never counted as suggested
-            # without a stored grouped proposal; a store failure propagates
-            # rather than reporting an unpersisted suggestion.
-            suggestion = CategorySuggestion(
-                normalized_merchant=context.merchant,
-                category_name=decision.category_name,
-                subcategory_name=decision.subcategory_name,
-                parent_category_id=decision.parent_category_id,
-                rationale=decision.rationale,
-                evidence_urls=decision.evidence_urls,
-                research_packet_sha256=packet.packet_sha256,
-                context_fingerprints=(context.fingerprint,),
-            )
-            stored = self._suggestion_recorder(suggestion)
-            return TransactionOutcome(
-                TransactionStatus.SUGGESTED,
-                Resolution.LLM,
-                suggestion_id=stored.suggestion_id,
-            )
-
-        assert isinstance(decision, EnrichedSelect)
-        authorized_choice = next(
-            (item for item in choices if item["subcategory_id"] == decision.choice_id),
-            None,
-        )
-        if authorized_choice is None:
-            return TransactionOutcome(
-                TransactionStatus.UNRESOLVED,
-                Resolution.LLM,
-                UnresolvedReason.INVALID_CHOICE,
-            )
-        # V33: write mode authorizes only an exact approved select for this
-        # context, packet hash and choice. Every other selection stays shadow.
-        if categorizer is not None and categorizer.can_write_enriched(
-            context, packet, decision.choice_id
-        ):
-            return self._insert_choice(
-                date, merchant, cost, authorized_choice, Resolution.LLM
-            )
-        return TransactionOutcome(
-            TransactionStatus.SHADOW,
-            Resolution.LLM,
-            suggested_choice_id=decision.choice_id,
         )
 
     def get_auto_match_category(self, merchant: str) -> tuple[str, str] | None:

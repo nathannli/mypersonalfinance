@@ -176,9 +176,65 @@ class TestEnrichedGoldParsing(unittest.TestCase):
         # V46: a finance case without packet identity is a pre-packet case.
         self.assertIn("predates packet identity", str(raised.exception))
 
-    def test_parents_finance_is_never_enriched(self):
+    def parents_case(self, action: str, **overrides) -> dict:
+        raw = copy_case(action)
+        raw.update(
+            database="parents_finance",
+            expected_subcategory_name=None,
+            expected_parent_category_id=None,
+        )
+        raw.update(overrides)
+        return raw
+
+    def test_parents_cases_use_the_same_fields_with_one_level(self):
+        for action in ("select", "suggest_new", "abstain"):
+            with self.subTest(action=action):
+                case = parse_one(self.parents_case(action), "parents_finance")
+                self.assertEqual(case.database, "parents_finance")
+                self.assertIsNone(case.expected_subcategory_name)
+
+    def test_parents_suggestion_matches_on_category_name_and_evidence(self):
+        case = parse_one(self.parents_case("suggest_new"), "parents_finance")
+        decision = EnrichedSuggestion(
+            category_name=f" {case.expected_category_name.upper()} ",
+            subcategory_name=None,
+            parent_category_id=None,
+            rationale="r",
+            evidence_urls=case.expected_evidence_urls,
+            context_fingerprint=case.fingerprint,
+        )
+
+        self.assertTrue(case.matches(decision))
+        self.assertEqual(
+            describe_enriched_decision(decision),
+            f"suggest_new:{decision.category_name}",
+        )
+
+    def test_parents_cases_must_leave_the_second_level_null(self):
+        for field, value in (
+            ("expected_subcategory_name", "Widgets"),
+            ("expected_parent_category_id", 1),
+        ):
+            for action in ("select", "suggest_new", "abstain"):
+                with self.subTest(field=field, action=action):
+                    with self.assertRaises(ApprovalError):
+                        parse_one(
+                            self.parents_case(action, **{field: value}),
+                            "parents_finance",
+                        )
+
+    def test_each_database_reads_only_its_own_cases(self):
+        document = load_fixture()
+        finance = parse_enriched_gold_cases(document, "finance")
+        document["cases"].append(self.parents_case("select"))
+        document["cases"][-1]["fingerprint"] = "c" * 64
+
+        self.assertEqual(parse_enriched_gold_cases(document, "finance"), finance)
+        self.assertEqual(len(parse_enriched_gold_cases(document, "parents_finance")), 1)
+
+    def test_unknown_database_has_no_enriched_gold(self):
         with self.assertRaises(ApprovalError):
-            parse_enriched_gold_cases(load_fixture(), "parents_finance")
+            parse_enriched_gold_cases(load_fixture(), "other")
 
     def test_unknown_action_is_rejected(self):
         raw = copy_case("abstain")

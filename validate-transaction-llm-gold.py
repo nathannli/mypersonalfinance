@@ -4,8 +4,8 @@ Runs three fresh passes of the production categorizer over the selected
 database's private gold subset and, only when every case matches in all
 three passes, writes that database's write-approval record.
 
-With ``--enriched`` it validates the packet-bound enriched gold subset for
-``finance`` instead: each case must still resolve an approved research packet
+With ``--enriched`` it validates the selected database's packet-bound enriched
+gold subset instead: each case must still resolve an approved research packet
 with its exact bound hash and schema/query versions, the request goes through
 the exact production enriched path, and approval is written only under the
 enriched key so the unenriched records are left untouched.
@@ -18,6 +18,7 @@ model's returned action/choice only.
 import argparse
 from collections import defaultdict
 from decimal import Decimal
+from functools import partial
 
 from config import Config
 from db.my_finance import MyFinanceDB
@@ -26,6 +27,7 @@ from services.deterministic_categorization import (
     DeterministicOutcome,
     DeterministicResolution,
     resolve_deterministic_choice,
+    resolve_parents_choice,
 )
 from services.enriched_categorization import resolve_approved_packet
 from services.gold_validator import (
@@ -36,7 +38,6 @@ from services.gold_validator import (
     write_enriched_approval_record,
 )
 from services.transaction_llm_approval import (
-    ENRICHED_GOLD_DATABASE,
     load_enriched_gold_cases,
     load_gold_cases,
 )
@@ -69,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Validate the packet-bound enriched gold subset and write the "
-            f"enriched approval record ({ENRICHED_GOLD_DATABASE} only)"
+            "database's enriched approval record"
         ),
     )
     parser.add_argument(
@@ -102,9 +103,15 @@ def _run_enriched(
     workers: int = 1,
 ) -> int:
     model = config.enriched_transaction_llm_model
+    parents = database_name == "parents_finance"
+    packet_resolver = (
+        partial(resolve_approved_packet, database=database_name)
+        if parents
+        else resolve_approved_packet
+    )
     try:
         cases = load_enriched_gold_cases(
-            database_name, choices, packet_resolver=resolve_approved_packet
+            database_name, choices, packet_resolver=packet_resolver
         )
         # Gold stores normalized descriptors. Recover the observed spelling for
         # exact-match rules and leave ambiguous spellings on the model route.
@@ -119,6 +126,30 @@ def _run_enriched(
             descriptors[
                 normalize_context_text(merchant), amount_to_minor_units(cost)
             ].add(merchant)
+
+        # parents rules are exact on the raw spelling, so spellings saved in
+        # auto_match count too.
+        rule_spellings = defaultdict(set)
+        if parents:
+            for (merchant,) in database.select("SELECT merchant_name FROM auto_match"):
+                rule_spellings[normalize_context_text(merchant)].add(merchant)
+
+        def resolve_parents_rule(case):
+            spellings = descriptors.get(
+                (case.merchant, case.amount_minor_units), set()
+            ) | rule_spellings.get(case.merchant, set())
+            if len(spellings) == 1:
+                (merchant,) = spellings
+                lookup = partial(database.get_auto_match_category, merchant)
+            else:
+                lookup = partial(
+                    database.get_substring_auto_match_category, case.merchant
+                )
+            return resolve_parents_choice(
+                cc_category=case.statement_category,
+                choices=choices,
+                auto_match=lookup,
+            )
 
         def resolve_rule(case):
             matches = descriptors.get((case.merchant, case.amount_minor_units), ())
@@ -149,10 +180,10 @@ def _run_enriched(
             cases,
             choices,
             production_categorizer_factory(config, model=model),
-            packet_resolver=resolve_approved_packet,
+            packet_resolver=packet_resolver,
             workers=workers,
             on_case=report,
-            resolve_rule=resolve_rule,
+            resolve_rule=resolve_parents_rule if parents else resolve_rule,
         )
     except Exception as e:
         print(f"Validation failed: {e}")
@@ -219,13 +250,6 @@ def main(argv: list[str] | None = None) -> int:
     database_name = args.database
     if args.workers is not None and not args.enriched:
         print("Validation failed: --workers requires --enriched")
-        return 1
-
-    if args.enriched and database_name != ENRICHED_GOLD_DATABASE:
-        print(
-            f"Validation failed: --enriched is only supported for "
-            f"{ENRICHED_GOLD_DATABASE}"
-        )
         return 1
 
     try:

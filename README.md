@@ -65,6 +65,19 @@ repeat `--list` to resume. Reapplying a saved answer reports `duplicate` without
 changing its category. This workflow inserts pending expenses; it does not edit
 already loaded transactions or create taxonomy entries.
 
+For `parents_finance`, add `--database parents_finance` and answer with
+`--category <category_id>` (its categories are one level, so `--subcategory` is
+refused, as `--category` is for `finance`). It queues the rows held for manual
+context: Interac e-transfers and descriptors containing `e-tfr`, `e-transfer`,
+`tfr-to`, `tfr-fr`, `tfr to `, `cash with`, `cad draft` or `draft #`, or a word
+starting with `chq` or `w/d`. A row that an existing rule matches is loaded by
+the rule, not held.
+
+```sh
+uv run --frozen python categorize-etransfers.py --database parents_finance \
+  --type td_debit --filepath ~/Downloads/td-debit.csv --list
+```
+
 ## tests and lint
 
 ```sh
@@ -522,11 +535,12 @@ TRANSACTION_LLM_TIMEOUT_SECONDS=120
 TRANSACTION_LLM_MODE=shadow
 ```
 
-`TRANSACTION_LLM_MODEL` governs `parents_finance` and unenriched validation.
-`ENRICHED_TRANSACTION_LLM_MODEL` governs enriched `finance` only; it defaults to
-`anthropic/claude-haiku-4-5` and never changes the parents path. Only the
-configured base URL and the exact configured model are ever called; there is no
-provider or model fallback. A missing or empty `LLM_API_KEY` becomes a
+`ENRICHED_TRANSACTION_LLM_MODEL` governs loading and `--enriched` validation for
+both databases; it defaults to `anthropic/claude-haiku-4-5`.
+`ENRICHED_TRANSACTION_LLM_BACKUP_MODEL` optionally names a second model, used
+when the primary is unavailable or lacks write approval; in write mode it needs
+its own approval. `TRANSACTION_LLM_MODEL` governs only unenriched `finance`
+validation. Only the configured base URL and these exact models are ever called. A missing or empty `LLM_API_KEY` becomes a
 `provider_error` on the first LLM call, so deterministic-only runs need no key.
 
 `LLM_BASE_URL` is part of the enriched write approval identity, and only
@@ -540,15 +554,20 @@ and requires a fresh three-pass gate.
 
 ### Research-first workflow
 
-Enriched `finance` categorization answers unknown merchants from frozen,
-human-approved research packets. The load path never calls the web.
+Both databases answer unknown merchants from frozen, human-approved research
+packets. The load path never calls the web. Packets, review decisions and
+suggestions are kept per database: pass `--database parents_finance` to the
+research, review and load commands (review defaults to `finance`). A merchant
+seen by both databases is researched and reviewed once for each. Rows held for
+manual context are never researched or sent to the model.
 
 1. Research: `uv run --frozen python research-transaction-merchants.py --type amex
    --folder ~/Downloads/amex/ --database finance` discovers
    current deterministic unknowns, queries TinyFish once per merchant, and
    writes a pending packet per merchant. Add `--refresh` to re-research a
    merchant whose evidence changed.
-2. Review: `review-transaction-research.py` lists pending packets and records
+2. Review: `review-transaction-research.py [--database parents_finance]` lists
+   pending packets and records
    `--approve <packet_id>` or `--reject <packet_id> --reason <text>` offline.
    Approval binds the exact `packet_sha256`; a successful refresh returns the
    packet to pending.
@@ -580,7 +599,8 @@ requests, so they run unchanged without it.
 - Packets, evidence, approvals, and suggestions live in git-ignored private
   files under the repository root: `.transaction-web-research/`,
   `.transaction-web-research-approvals.json`, and
-  `.transaction-category-suggestions.json`. Search and fetch content, real
+  `.transaction-category-suggestions.json`, plus the same three names ending in
+  `-parents` for `parents_finance`. Search and fetch content, real
   packets, suggestions, amounts, and keys never enter git, cron output, or
   persistent logs.
 
@@ -589,7 +609,8 @@ requests, so they run unchanged without it.
 `suggest_new` is recommendation-only. It records a cited proposal for a
 category the live taxonomy does not contain and makes the run `partial`; it
 never creates a category or subcategory row, writes an auto-match entry, or
-inserts the expense. Applying a suggestion is a manual decision.
+inserts the expense. A `parents_finance` proposal names a category only; choosing
+its fixed or variable main category is yours. Applying a suggestion is a manual decision.
 
 ### Cloud and proxy trust
 
@@ -658,9 +679,10 @@ passing validation runs:
 
 - `.transaction-llm-gold.json` — private, git-ignored, real transaction
   contexts with user-approved expected results.
-- `.transaction-llm-approval.json` — private, git-ignored approval record with
-  separate per-database entries and a separate `finance:enriched` entry holding
-  only identity hashes, pass count, and timestamp.
+- `.transaction-llm-approval.json` — private, git-ignored approval record
+  holding only identity hashes, pass count, and timestamp. Enriched entries are
+  keyed per database and per base URL and model (`finance` also keeps a bare
+  `finance:enriched` entry).
 - `tests/fixtures/transaction_llm_gold_synthetic.json` and
   `tests/fixtures/transaction_llm_gold_enriched_synthetic.json` — tracked,
   synthetic data only, used by the automated tests.
@@ -669,8 +691,11 @@ Validate the protocol you are approving:
 
 ```sh
 uv run --frozen python validate-transaction-llm-gold.py --database finance --enriched
-uv run --frozen python validate-transaction-llm-gold.py --database parents_finance
+uv run --frozen python validate-transaction-llm-gold.py --database parents_finance --enriched
 ```
+
+`parents_finance` has no unenriched validation or approval. Its replay fails any
+gold case that is held for manual context or hits an invalid rule mapping.
 
 All private files resolve from the repository root, never the process working
 directory, so cron and direct runs agree. Each validation pass builds a fresh

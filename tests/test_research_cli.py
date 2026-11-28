@@ -159,9 +159,9 @@ class ResearchCliTestCase(CliTestCase):
         self.patch(
             research_cli,
             "run_targets",
-            lambda targets, *, client, refresh=False: (
+            lambda targets, *, client, refresh=False, **kw: (
                 research_runner_module.run_targets(
-                    targets, client=client, refresh=refresh, root=self.root
+                    targets, client=client, refresh=refresh, root=self.root, **kw
                 )
             ),
         )
@@ -227,22 +227,6 @@ class TestApiKeyResolution(CliTestCase):
 
 
 class TestResearchCliGuardRails(ResearchCliTestCase):
-    def test_rejects_a_database_other_than_finance(self):
-        code, output = self.run_cli(
-            research_cli,
-            [
-                "--type",
-                "amex",
-                "--filepath",
-                "/dev/null",
-                "--database",
-                "parents_finance",
-            ],
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("finance only", output)
-        self.assertEqual(self.client.search_calls, [])
-
     def test_missing_api_key_fails_before_any_request(self):
         def missing():
             raise ValueError("TINYFISH_API_KEY is required")
@@ -415,26 +399,28 @@ class ReviewCliTestCase(CliTestCase):
         self.patch(
             review_cli,
             "list_packet_ids",
-            lambda: packets.list_packet_ids(root=self.root),
+            lambda **kw: packets.list_packet_ids(root=self.root, **kw),
         )
         self.patch(
             review_cli,
             "load_packet",
-            lambda pid: packets.load_packet(pid, root=self.root),
+            lambda pid, **kw: packets.load_packet(pid, root=self.root, **kw),
         )
         self.patch(
             review_cli,
             "review_record_for",
-            lambda pid: packets.review_record_for(pid, root=self.root),
+            lambda pid, **kw: packets.review_record_for(pid, root=self.root, **kw),
         )
         self.patch(
             review_cli,
             "record_review",
-            lambda record: packets.record_review(record, root=self.root),
+            lambda record, **kw: packets.record_review(record, root=self.root, **kw),
         )
         self.packet = self.store_packet_for("acme widgets")
 
-    def store_packet_for(self, merchant: str, **overrides) -> ResearchPacket:
+    def store_packet_for(
+        self, merchant: str, database: str = "finance", **overrides
+    ) -> ResearchPacket:
         values = {
             "normalized_merchant": merchant,
             "derived_query": merchant,
@@ -462,8 +448,93 @@ class ReviewCliTestCase(CliTestCase):
         }
         values.update(overrides)
         packet = ResearchPacket(**values)
-        store_packet(packet, root=self.root)
+        store_packet(packet, root=self.root, database=database)
         return packet
+
+
+class TestParentsResearchCli(ResearchCliTestCase):
+    def parents(self, *merchants: str) -> tuple[int, str]:
+        from services import research_packets as packets
+
+        for name in ("load_packet", "review_record_for"):
+            self.patch(
+                research_cli,
+                name,
+                lambda pid, _read=getattr(packets, name), **kw: _read(
+                    pid, root=self.root, **kw
+                ),
+            )
+        self.patch(research_cli, "load_rows", lambda t, files: rows_for(*merchants))
+        self.patch(research_cli, "ParentsFinanceDB", lambda **kwargs: ParentsFakeDB())
+        self.patch(
+            research_cli,
+            "MyFinanceDB",
+            lambda **kwargs: self.fail("finance database opened for parents"),
+        )
+        return self.run_cli(
+            research_cli,
+            [
+                "--type",
+                "amex",
+                "--filepath",
+                "/dev/null",
+                "--database",
+                "parents_finance",
+            ],
+        )
+
+    def test_parents_research_writes_only_parents_state(self):
+        code, output = self.parents("Acme Widgets", "CHQ#12", "Known Shop")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.client.search_calls), 1)
+        self.assertIn("  - chq#12", output)
+        self.assertIn("categorize-etransfers.py --database parents_finance", output)
+        self.assertIn("--database parents_finance", output.split("Review with:")[1])
+        self.assertIn("pending review 1", output)
+        self.assertEqual(
+            len(list((self.root / ".transaction-web-research-parents").iterdir())), 1
+        )
+        self.assertEqual(self.stored_packets(), [])
+
+
+class ParentsFakeDB:
+    def get_categorization_choices(self):
+        return [{"category_id": 1, "category_name": "Groceries"}]
+
+    def get_auto_match_category(self, merchant: str):
+        return "Groceries" if merchant == "Known Shop" else None
+
+
+class TestParentsReviewCli(ReviewCliTestCase):
+    def test_decisions_stay_in_the_parents_store(self):
+        packet = self.store_packet_for("parents only shop", database="parents_finance")
+
+        code, listing = self.run_cli(
+            review_cli, ["--database", "parents_finance", "--list"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("parents only shop", listing)
+        self.assertNotIn("acme widgets", listing)
+        self.assertIn("--database parents_finance --approve", listing)
+
+        code, _ = self.run_cli(
+            review_cli,
+            ["--database", "parents_finance", "--approve", packet.packet_id],
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(
+            (self.root / ".transaction-web-research-approvals-parents.json").exists()
+        )
+        self.assertFalse(
+            (self.root / ".transaction-web-research-approvals.json").exists()
+        )
+
+    def test_default_is_finance(self):
+        code, listing = self.run_cli(review_cli, ["--list"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("acme widgets", listing)
 
 
 class TestReviewCli(ReviewCliTestCase):
@@ -703,7 +774,7 @@ class TestReviewSuggestionsSurface(ReviewCliTestCase):
         self.patch(
             review_cli,
             "load_suggestions",
-            lambda: packets.load_suggestions(root=self.root),
+            lambda **kw: packets.load_suggestions(root=self.root, **kw),
         )
 
     def store_suggestion(self, merchant: str = "acme widgets"):
@@ -719,6 +790,28 @@ class TestReviewSuggestionsSurface(ReviewCliTestCase):
             ),
             root=self.root,
         )
+
+    def test_parents_proposal_renders_without_a_subcategory_line(self):
+        self.packets.record_suggestion(
+            self.packets.CategorySuggestion(
+                normalized_merchant="parents shop",
+                category_name="Hobbies",
+                subcategory_name=None,
+                rationale="Scale models.",
+                evidence_urls=(SEARCH_URL,),
+                research_packet_sha256=self.packet.packet_sha256,
+            ),
+            root=self.root,
+            database="parents_finance",
+        )
+
+        code, output = self.run_cli(
+            review_cli, ["--database", "parents_finance", "--suggestions"]
+        )
+
+        self.assertEqual(code, 0)
+        self.assertIn("category   : Hobbies", output)
+        self.assertNotIn("subcategory:", output)
 
     def test_empty_artifact_reports_nothing_recorded(self):
         code, output = self.run_cli(review_cli, ["--suggestions"])
@@ -783,12 +876,12 @@ class ResearchCoverageTestCase(CliTestCase):
             self.patch(
                 research_cli,
                 "load_packet",
-                lambda pid: packets.load_packet(pid, root=self.root),
+                lambda pid, **kw: packets.load_packet(pid, root=self.root, **kw),
             )
         self.patch(
             research_cli,
             "review_record_for",
-            lambda pid: packets.review_record_for(pid, root=self.root),
+            lambda pid, **kw: packets.review_record_for(pid, root=self.root, **kw),
         )
         self.packets = packets
 

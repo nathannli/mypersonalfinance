@@ -86,10 +86,10 @@ class CanonicalContext:
     amount_minor_units: int
     statement_category: str | None
     allowed_choices: tuple[dict[str, int | str], ...]
-    # Only enriched `finance` contexts carry packet identity (V30). These keys
-    # are omitted from the canonical bytes when absent so unenriched and
-    # `parents_finance` fingerprints stay byte-identical (V2), while enriched
-    # contexts get a distinct fingerprint space (V46). The triple is
+    # Only enriched contexts carry packet identity (V30). These keys are
+    # omitted from the canonical bytes when absent so unenriched fingerprints
+    # stay byte-identical (V2), while enriched contexts get a distinct
+    # fingerprint space (V46). The triple is
     # all-or-none: a packet digest always travels with that packet's schema and
     # query versions, because a digest without its versions cannot be re-bound
     # to the evidence it was approved against.

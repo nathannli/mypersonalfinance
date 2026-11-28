@@ -270,6 +270,52 @@ class TestSuggestionArtifactValidation(SuggestionArtifactTestCase):
         self.assertEqual(stored.as_dict(), original.as_dict())
 
 
+class TestOneLevelSuggestions(SuggestionArtifactTestCase):
+    """V12/V16: parents proposals have no subcategory; finance ones always do."""
+
+    parents = "parents_finance"
+
+    def test_parents_proposal_round_trips_with_null_subcategory(self):
+        stored = record_suggestion(
+            make_suggestion(subcategory_name=None),
+            root=self.root,
+            database=self.parents,
+        )
+
+        loaded = load_suggestions(root=self.root, database=self.parents)
+
+        self.assertEqual(loaded["acme widgets"], (stored,))
+        self.assertIsNone(loaded["acme widgets"][0].subcategory_name)
+        self.assertFalse(suggestion_records_path(root=self.root).exists())
+
+    def test_null_subcategory_never_enters_the_finance_file(self):
+        with self.assertRaises(ResearchStoreError):
+            record_suggestion(make_suggestion(subcategory_name=None), root=self.root)
+
+        record_suggestion(make_suggestion(), root=self.root)
+        payload = self.read_payload()
+        entry = payload["merchants"]["acme widgets"][0]
+        entry["subcategory_name"] = None
+        entry["suggestion_id"] = make_suggestion(subcategory_name=None).suggestion_id
+        self.write_payload(payload)
+        with self.assertRaises(ResearchPacketMalformedError):
+            load_suggestions(root=self.root)
+
+    def test_a_subcategory_never_enters_the_parents_file(self):
+        with self.assertRaises(ResearchStoreError):
+            record_suggestion(make_suggestion(), root=self.root, database=self.parents)
+        self.assertFalse(
+            suggestion_records_path(root=self.root, database=self.parents).exists()
+        )
+
+        record_suggestion(make_suggestion(), root=self.root)
+        suggestion_records_path(root=self.root, database=self.parents).write_bytes(
+            suggestion_records_path(root=self.root).read_bytes()
+        )
+        with self.assertRaises(ResearchPacketMalformedError):
+            load_suggestions(root=self.root, database=self.parents)
+
+
 class TestSuggestionWriterLock(SuggestionArtifactTestCase):
     def test_lock_contention_is_reported_and_mutates_nothing(self):
         record_suggestion(make_suggestion(), root=self.root)

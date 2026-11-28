@@ -135,39 +135,33 @@ class TestAuthorizerModelBinding(unittest.TestCase):
         with patch.object(factory_module, "authorize_write_mode") as authorize:
             authorize.return_value = lambda *args: True
 
-            factory_module.write_authorizer_for(
-                fake_config(), "parents_finance", lambda: []
-            )
+            factory_module.write_authorizer_for(fake_config(), "finance", lambda: [])
 
         self.assertEqual(authorize.call_args.kwargs["model"], LEGACY_MODEL)
 
-    def test_routing_sends_each_database_to_its_own_protocol(self):
-        with (
-            patch.object(factory_module, "authorize_enriched_write_mode") as enriched,
-            patch.object(factory_module, "authorize_write_mode") as legacy,
-        ):
-            enriched.return_value = lambda *args: True
-            legacy.return_value = lambda *args: True
+    def test_every_database_routes_to_the_enriched_protocol(self):
+        for database in ("finance", "parents_finance"):
+            with (
+                self.subTest(database=database),
+                patch.object(
+                    factory_module, "authorize_enriched_write_mode"
+                ) as enriched,
+                patch.object(factory_module, "authorize_write_mode") as legacy,
+            ):
+                enriched.return_value = lambda *args: True
 
-            finance = factory_module.write_authorizers_for(
-                fake_config(),
-                "finance",
-                lambda: [],
-                packet_resolver=lambda merchant: None,
-            )
-            parents = factory_module.write_authorizers_for(
-                fake_config(),
-                "parents_finance",
-                lambda: [],
-                packet_resolver=lambda merchant: None,
-            )
+                authorizers = factory_module.write_authorizers_for(
+                    fake_config(),
+                    database,
+                    lambda: [],
+                    packet_resolver=lambda merchant: None,
+                )
 
-        self.assertIsNotNone(finance.enriched)
-        self.assertIsNone(finance.legacy)
-        self.assertIsNotNone(parents.legacy)
-        self.assertIsNone(parents.enriched)
-        self.assertEqual(enriched.call_args.kwargs["model"], ENRICHED_MODEL)
-        self.assertEqual(legacy.call_args.kwargs["model"], LEGACY_MODEL)
+                self.assertIsNotNone(authorizers.enriched)
+                self.assertIsNone(authorizers.legacy)
+                self.assertEqual(enriched.call_args.kwargs["database"], database)
+                self.assertEqual(enriched.call_args.kwargs["model"], ENRICHED_MODEL)
+                legacy.assert_not_called()
 
     def test_shadow_mode_never_reads_the_taxonomy(self):
         calls = []

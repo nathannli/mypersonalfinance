@@ -49,7 +49,10 @@ def _reason(reason: UnresolvedReason) -> PacketResolution:
 
 
 def resolve_approved_packet(
-    normalized_merchant: str, *, root: Path | None = None
+    normalized_merchant: str,
+    *,
+    root: Path | None = None,
+    database: str = "finance",
 ) -> PacketResolution:
     """Resolve one merchant's frozen packet, or the reason it cannot be used.
 
@@ -61,7 +64,7 @@ def resolve_approved_packet(
     packet_id = packet_id_for(normalized_merchant)
 
     try:
-        packet = load_packet_if_present(packet_id, root=root)
+        packet = load_packet_if_present(packet_id, root=root, database=database)
     except ResearchPacketTamperedError:
         # A recomputed hash that differs is tampering, never staleness.
         return _reason(UnresolvedReason.RESEARCH_TAMPERED)
@@ -87,15 +90,15 @@ def resolve_approved_packet(
             return _reason(UnresolvedReason.RESEARCH_MALFORMED)
         return _reason(failure_reason)
 
-    return _resolve_approval(packet, packet_id, root=root)
+    return _resolve_approval(packet, packet_id, root=root, database=database)
 
 
 def _resolve_approval(
-    packet: ResearchPacket, packet_id: str, *, root: Path | None
+    packet: ResearchPacket, packet_id: str, *, root: Path | None, database: str
 ) -> PacketResolution:
     """V47: select and suggest_new require approval bound to this exact packet."""
     try:
-        record = review_record_for(packet_id, root=root)
+        record = review_record_for(packet_id, root=root, database=database)
     except ResearchPacketError:
         # A malformed review artifact approves nothing.
         return _reason(UnresolvedReason.RESEARCH_UNAPPROVED)

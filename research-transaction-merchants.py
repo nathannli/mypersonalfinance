@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 
 from cli.transaction_loader_cli import TransactionLoaderCLI
 from db.my_finance import MyFinanceDB
+from db.parents_finance import ParentsFinanceDB
 from services.research_packets import (
     PacketReviewStatus,
     PacketStatus,
@@ -52,22 +53,21 @@ from services.tinyfish_research import (
 from services.transaction_loader import TransactionLoader
 from utils.repo_paths import repo_root
 
-SUPPORTED_DATABASE = "finance"
 RECORD_SEPARATOR = "-" * 72
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = TransactionLoaderCLI().parser
     parser.description = (
-        "Research unresolved finance merchants with TinyFish and freeze "
+        "Research unresolved merchants with TinyFish and freeze "
         "evidence packets for review"
     )
     parser.epilog = f"""
 Two-phase workflow: this command calls TinyFish and freezes evidence;
 load-transactions.py only reads frozen packets.
 
-Requires {TINYFISH_API_KEY_ENV} in the repository .env. Only --database
-{SUPPORTED_DATABASE} is supported.
+Requires {TINYFISH_API_KEY_ENV} in the repository .env. Each database keeps its
+own packets and review decisions.
 
 Usage Examples:
 
@@ -121,7 +121,7 @@ def load_rows(card_type: str, files: Sequence[str | None]) -> list[Mapping]:
     return rows
 
 
-def coverage_line(packet_ids: Sequence[str]) -> str:
+def coverage_line(packet_ids: Sequence[str], database: str = "finance") -> str:
     """Count this run's packets by review state.
 
     A packet is pending only when it is reviewable *and* no record binds its
@@ -132,7 +132,7 @@ def coverage_line(packet_ids: Sequence[str]) -> str:
     approved = rejected = pending = failed = 0
     for packet_id in packet_ids:
         try:
-            packet = load_packet(packet_id)
+            packet = load_packet(packet_id, database=database)
         except ResearchPacketError:
             # A packet that cannot be read cannot be reviewed either.
             failed += 1
@@ -140,7 +140,7 @@ def coverage_line(packet_ids: Sequence[str]) -> str:
         if packet.status is PacketStatus.FAILED:
             failed += 1
             continue
-        record = review_record_for(packet_id)
+        record = review_record_for(packet_id, database=database)
         if record is None or record.packet_sha256 != packet.packet_sha256:
             pending += 1
         elif record.status is PacketReviewStatus.APPROVED:
@@ -193,13 +193,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.database != SUPPORTED_DATABASE:
-        print(
-            f"ERROR: research supports only --database {SUPPORTED_DATABASE}; "
-            f"got {args.database}. Enrichment applies to finance only (V2)."
-        )
-        return 1
-
     # Reuse the loader's own acceptance rules so the two commands cannot drift.
     loader_cli = TransactionLoaderCLI()
     try:
@@ -223,8 +216,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     print(f"Read {len(rows)} rows from {len(files)} input(s)")
 
-    print("Loading finance taxonomy...")
-    database = MyFinanceDB(debug=False)
+    parents = args.database == "parents_finance"
+    # The flag follows every command hint, so a parents run is never reviewed
+    # or categorized against the finance store.
+    database_flag = " --database parents_finance" if parents else ""
+    print(f"Loading {args.database} taxonomy...")
+    database = (ParentsFinanceDB if parents else MyFinanceDB)(debug=False)
     choices = database.get_categorization_choices()
 
     # Read-only discovery: rows the deterministic resolver cannot place (V4).
@@ -233,6 +230,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         card_type=args.type,
         choices=choices,
         auto_match=database.get_auto_match_category,
+        database=args.database,
     )
     print(f"Discovered {len(targets)} distinct unresolved merchant(s)")
     if manual:
@@ -240,8 +238,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         for merchant in manual:
             print(f"  - {merchant}")
         print(
-            "Categorize each transfer with: python categorize-etransfers.py "
-            "(same --type and statement inputs)"
+            "Categorize each transfer with: python categorize-etransfers.py"
+            f"{database_flag} (same --type and statement inputs)"
         )
 
     if not targets:
@@ -262,14 +260,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         targets,
         client=client,
         refresh=bool(args.refresh),
+        database=args.database,
     )
     summary = summarize(results)
     print_summary(summary)
 
-    print(f"\n{coverage_line([result.packet_id for result in results])}")
+    packet_ids = [result.packet_id for result in results]
+    print(f"\n{coverage_line(packet_ids, args.database)}")
     if summary.status is not ResearchRunStatus.FAILED:
         print(
-            "\nReview with: python review-transaction-research.py "
+            f"\nReview with: python review-transaction-research.py{database_flag} "
             "(approve or reject each exact packet hash before it can be used)"
         )
     print(f"{RECORD_SEPARATOR}")

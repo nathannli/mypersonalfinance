@@ -5,13 +5,26 @@ from unittest.mock import patch
 import polars as pl
 
 from db.parents_finance import ParentsFinanceDB
+from services.enriched_categorization import PacketResolution
+from services.llm_categorizer import (
+    EnrichedAbstain,
+    EnrichedExecution,
+    EnrichedSelect,
+    EnrichedSuggestion,
+)
+from services.research_packets import (
+    FetchedPage,
+    PacketStatus,
+    ResearchPacket,
+    SearchResult,
+)
 from services.transaction_categorization import (
-    CategorizationResult,
-    ProviderAction,
     Resolution,
     TransactionStatus,
     UnresolvedReason,
 )
+
+EVIDENCE_URL = "https://acme.example/about"
 
 
 CATEGORY_ROWS = [
@@ -22,19 +35,51 @@ CATEGORY_ROWS = [
 ]
 
 
+def make_packet(merchant: str) -> ResearchPacket:
+    return ResearchPacket(
+        normalized_merchant=merchant,
+        derived_query=merchant,
+        status=PacketStatus.COMPLETE,
+        searched_at="2026-09-17T12:00:00+00:00",
+        search_results=(
+            SearchResult(
+                position=0,
+                site_name="Acme",
+                title="Acme",
+                snippet="s",
+                url=EVIDENCE_URL,
+            ),
+        ),
+        fetched_pages=(
+            FetchedPage(
+                url=EVIDENCE_URL,
+                final_url=EVIDENCE_URL,
+                title="Acme",
+                description="d",
+                text="t",
+                relevance_matched_tokens=("acme",),
+            ),
+        ),
+    )
+
+
 class FakeCategorizer:
-    def __init__(self, result, authorized=False):
-        self.result = result
+    def __init__(self, execution=None, authorized=False):
+        self.execution = execution or select_result(1)
         self.authorized = authorized
-        self.contexts = []
+        self.calls = []
         self.authorization_calls = []
 
-    def categorize(self, context):
-        self.contexts.append(context)
-        return self.result
+    @property
+    def contexts(self):
+        return [context for context, _ in self.calls]
 
-    def can_write(self, context, choice_id):
-        self.authorization_calls.append((context, choice_id))
+    def categorize_enriched(self, context, packet):
+        self.calls.append((context, packet))
+        return self.execution
+
+    def can_write_enriched(self, context, packet, choice_id):
+        self.authorization_calls.append((context, packet, choice_id))
         return self.authorized
 
 
@@ -49,6 +94,21 @@ class FakeParentsFinanceDB(ParentsFinanceDB):
         self.auto_match_error = None
         self.category_rows = list(CATEGORY_ROWS)
         self.insert_calls = []
+        self.packet_reason = None
+        self.resolved_merchants = []
+        self.suggestions = []
+        self._packet_resolver = self.resolve_packet
+        self._suggestion_recorder = self.record
+
+    def resolve_packet(self, merchant):
+        self.resolved_merchants.append(merchant)
+        if self.packet_reason is not None:
+            return PacketResolution(reason=self.packet_reason)
+        return PacketResolution(packet=make_packet(merchant))
+
+    def record(self, suggestion):
+        self.suggestions.append(suggestion)
+        return suggestion
 
     def check_if_expense_exists(self, date, merchant, cost):
         return self.exact_duplicate
@@ -60,15 +120,6 @@ class FakeParentsFinanceDB(ParentsFinanceDB):
             orient="row",
         ).sort("category")
 
-    def get_category_id_from_name(self, category_name):
-        if category_name is None:
-            return None
-        normalized = category_name.replace("\xa0", " ").strip().lower()
-        matches = [row[0] for row in self.category_rows if row[1].lower() == normalized]
-        if len(matches) > 1:
-            raise ValueError(f"Multiple categories found for {category_name}.")
-        return matches[0] if matches else None
-
     def get_auto_match_category(self, merchant):
         if self.auto_match_error is not None:
             raise self.auto_match_error
@@ -79,7 +130,9 @@ class FakeParentsFinanceDB(ParentsFinanceDB):
 
 
 def select_result(choice_id):
-    return CategorizationResult(ProviderAction.SELECT, choice_id=choice_id)
+    return EnrichedExecution(
+        decision=EnrichedSelect(choice_id, (EVIDENCE_URL,), "f" * 64)
+    )
 
 
 class ParentsFlowTestCase(unittest.TestCase):
@@ -174,9 +227,10 @@ class TestParentsLlmFlow(ParentsFlowTestCase):
         self.assertEqual(outcome.resolution, Resolution.LLM)
         self.assertEqual(outcome.suggested_choice_id, 1)
         self.assertEqual(self.db.insert_calls, [])
-        self.assertEqual(len(categorizer.contexts), 1)
-        self.assertEqual(categorizer.contexts[0].database, "parents_finance")
-        self.assertEqual(categorizer.contexts[0].amount_minor_units, 4150)
+        ((context, packet),) = categorizer.calls
+        self.assertEqual(context.database, "parents_finance")
+        self.assertEqual(context.amount_minor_units, 4150)
+        self.assertEqual(context.research_packet_sha256, packet.packet_sha256)
 
     def test_exact_approved_context_and_choice_inserts(self):
         categorizer = FakeCategorizer(select_result(4), authorized=True)
@@ -185,7 +239,7 @@ class TestParentsLlmFlow(ParentsFlowTestCase):
 
         self.assertEqual(outcome.status, TransactionStatus.INSERTED)
         self.assertEqual(outcome.resolution, Resolution.LLM)
-        self.assertEqual(categorizer.authorization_calls[0][1], 4)
+        self.assertEqual(categorizer.authorization_calls[0][2], 4)
         self.assertEqual(self.db.insert_calls[0][1][-1], 4)
 
     def test_authorized_ignore_choice_is_ignored_not_inserted(self):
@@ -199,9 +253,7 @@ class TestParentsLlmFlow(ParentsFlowTestCase):
 
     def test_abstain_is_unresolved_without_authorization_or_insert(self):
         categorizer = FakeCategorizer(
-            CategorizationResult(
-                ProviderAction.ABSTAIN, reason=UnresolvedReason.ABSTAINED
-            ),
+            EnrichedExecution(decision=EnrichedAbstain("thin", "f" * 64)),
             authorized=True,
         )
 
@@ -212,6 +264,36 @@ class TestParentsLlmFlow(ParentsFlowTestCase):
         self.assertEqual(categorizer.authorization_calls, [])
         self.assertEqual(self.db.insert_calls, [])
 
+    def test_suggestion_is_recorded_and_writes_nothing(self):
+        decision = EnrichedSuggestion(
+            category_name="Gadgets",
+            subcategory_name=None,
+            parent_category_id=None,
+            rationale="widgets",
+            evidence_urls=(EVIDENCE_URL,),
+            context_fingerprint="f" * 64,
+        )
+        categorizer = FakeCategorizer(
+            EnrichedExecution(decision=decision), authorized=True
+        )
+
+        outcome = self.insert(categorizer=categorizer)
+
+        self.assertEqual(outcome.status, TransactionStatus.SUGGESTED)
+        (stored,) = self.db.suggestions
+        self.assertEqual(outcome.suggestion_id, stored.suggestion_id)
+        self.assertIsNone(stored.subcategory_name)
+        self.assertEqual(self.db.insert_calls, [])
+
+    def test_provider_failure_keeps_its_reason(self):
+        categorizer = FakeCategorizer(
+            EnrichedExecution(reason=UnresolvedReason.TIMEOUT)
+        )
+
+        self.assertEqual(
+            self.insert(categorizer=categorizer).reason, UnresolvedReason.TIMEOUT
+        )
+
     def test_choice_outside_live_categories_is_unresolved(self):
         categorizer = FakeCategorizer(select_result(999), authorized=True)
 
@@ -220,6 +302,24 @@ class TestParentsLlmFlow(ParentsFlowTestCase):
         self.assertEqual(outcome.status, TransactionStatus.UNRESOLVED)
         self.assertEqual(outcome.reason, UnresolvedReason.INVALID_CHOICE)
         self.assertEqual(self.db.insert_calls, [])
+
+    def test_unusable_packet_reports_its_reason_without_a_provider_call(self):
+        for reason in (
+            UnresolvedReason.RESEARCH_MISSING,
+            UnresolvedReason.RESEARCH_STALE,
+            UnresolvedReason.RESEARCH_TAMPERED,
+            UnresolvedReason.RESEARCH_UNAPPROVED,
+            UnresolvedReason.RESEARCH_IRRELEVANT,
+        ):
+            for categorizer in (FakeCategorizer(authorized=True), None):
+                with self.subTest(reason=reason, categorizer=categorizer):
+                    self.db.packet_reason = reason
+
+                    outcome = self.insert(categorizer=categorizer)
+
+                    self.assertEqual(outcome.reason, reason)
+                    self.assertEqual(getattr(categorizer, "calls", []), [])
+                    self.assertEqual(self.db.insert_calls, [])
 
     def test_cron_run_never_prompts_and_returns_typed_outcome(self):
         self.db = FakeParentsFinanceDB(cron=True)
@@ -238,6 +338,41 @@ class TestParentsLlmFlow(ParentsFlowTestCase):
         self.assertEqual(outcome.status, TransactionStatus.UNRESOLVED)
         self.assertEqual(outcome.reason, UnresolvedReason.PROVIDER_ERROR)
         self.assertEqual(self.db.insert_calls, [])
+
+
+class TestParentsHeldRows(ParentsFlowTestCase):
+    """V2/V3: rules win; unmatched transfers, cheques and cash stay local."""
+
+    def test_unmatched_held_rows_make_no_packet_or_provider_call(self):
+        for merchant in ("CAD DRAFT JANE EXAMPLE", "TD ATM W/D 004"):
+            with self.subTest(merchant=merchant):
+                categorizer = FakeCategorizer(authorized=True)
+
+                outcome = self.insert(categorizer=categorizer, merchant=merchant)
+
+                self.assertEqual(
+                    outcome.reason, UnresolvedReason.MANUAL_CONTEXT_REQUIRED
+                )
+                self.assertEqual(categorizer.calls, [])
+                self.assertEqual(self.db.resolved_merchants, [])
+                self.assertEqual(self.db.insert_calls, [])
+
+    def test_a_rule_matched_cash_row_still_resolves(self):
+        self.db.auto_match = "Utilities"
+        categorizer = FakeCategorizer()
+
+        outcome = self.insert(categorizer=categorizer, merchant="TD ATM W/D 004")
+
+        self.assertEqual(outcome.status, TransactionStatus.INSERTED)
+        self.assertEqual(outcome.resolution, Resolution.DETERMINISTIC)
+        self.assertEqual(categorizer.calls, [])
+
+    def test_markers_inside_an_ordinary_token_are_not_held(self):
+        for merchant in ("NEW/DEAL SHOP", "XCHQMART"):
+            with self.subTest(merchant=merchant):
+                outcome = self.insert(categorizer=FakeCategorizer(), merchant=merchant)
+
+                self.assertEqual(outcome.status, TransactionStatus.SHADOW)
 
 
 class TestTaxonomySnapshotAndContextReason(ParentsFlowTestCase):

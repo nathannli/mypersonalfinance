@@ -7,6 +7,7 @@ validation, and orchestration of the transaction loading process.
 
 import argparse
 from collections.abc import Sequence
+from functools import partial
 from sys import exit
 
 from config import Config
@@ -21,7 +22,7 @@ from services.categorizer_factory import build_categorizer, write_authorizers_fo
 from services.enriched_categorization import resolve_approved_packet
 from services.llm_categorizer import OpenCodexCategorizer
 from services.transaction_loader import TransactionLoader, statement_files
-from services.transaction_llm_approval import ENRICHED_GOLD_DATABASE
+from services.transaction_llm_approval import SUPPORTED_DATABASES
 from services.transaction_processor import TransactionProcessor
 
 
@@ -169,12 +170,12 @@ Supported card types:
     ) -> OpenCodexCategorizer:
         """Build the categorizer for one database's protocol.
 
-        Enriched ``finance`` calls ``ENRICHED_TRANSACTION_LLM_MODEL``;
-        ``parents_finance`` keeps ``TRANSACTION_LLM_MODEL`` (V51).
+        Every supported database is enriched and calls
+        ``ENRICHED_TRANSACTION_LLM_MODEL`` (V51).
         """
         model = (
             config.enriched_transaction_llm_model
-            if database_name == ENRICHED_GOLD_DATABASE
+            if database_name in SUPPORTED_DATABASES
             else None
         )
         return build_categorizer(
@@ -235,20 +236,25 @@ Supported card types:
             print("Database loaded\n")
 
             # Fail closed before any mutation when write mode is unapproved.
-            # Enriched finance is gated by packet-bound approval; parents_finance
-            # keeps the unenriched gate.
+            # Each database is gated by its own packet-bound approval, checked
+            # against its own packet store.
+            packet_resolver = (
+                resolve_approved_packet
+                if database_name == "finance"
+                else partial(resolve_approved_packet, database=database_name)
+            )
             authorizers = write_authorizers_for(
                 config,
                 database_name,
                 database.get_categorization_choices,
-                packet_resolver=resolve_approved_packet,
+                packet_resolver=packet_resolver,
             )
             categorizer = self._build_categorizer(
                 config, database_name, authorizers.legacy, authorizers.enriched
             )
             backup_model = getattr(config, "enriched_transaction_llm_backup_model", "")
             if (
-                database_name == ENRICHED_GOLD_DATABASE
+                database_name in SUPPORTED_DATABASES
                 and backup_model
                 and backup_model != config.enriched_transaction_llm_model
             ):

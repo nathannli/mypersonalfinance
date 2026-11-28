@@ -27,10 +27,8 @@ from services.transaction_categorization import (
     normalize_context_text,
 )
 from utils.repo_paths import (
-    PRIVATE_RESEARCH_DIRNAME,
+    RESEARCH_ARTIFACTS,
     RESEARCH_LOCK_FILENAME,
-    RESEARCH_REVIEW_FILENAME,
-    SUGGESTION_FILENAME,
     repo_root,
 )
 
@@ -599,7 +597,7 @@ class CategorySuggestion:
 
     normalized_merchant: str
     category_name: str
-    subcategory_name: str
+    subcategory_name: str | None  # None: one-level parents_finance proposal
     rationale: str
     evidence_urls: tuple[str, ...]
     research_packet_sha256: str
@@ -633,13 +631,16 @@ class CategorySuggestion:
                 self.category_name, "category_name", MAX_SUGGESTION_NAME_CHARS
             ),
         )
-        object.__setattr__(
-            self,
-            "subcategory_name",
-            _bounded_text(
-                self.subcategory_name, "subcategory_name", MAX_SUGGESTION_NAME_CHARS
-            ),
-        )
+        if self.subcategory_name is not None:
+            object.__setattr__(
+                self,
+                "subcategory_name",
+                _bounded_text(
+                    self.subcategory_name,
+                    "subcategory_name",
+                    MAX_SUGGESTION_NAME_CHARS,
+                ),
+            )
         object.__setattr__(
             self,
             "rationale",
@@ -680,7 +681,7 @@ class CategorySuggestion:
                 SUGGESTION_ID_PREFIX,
                 self.normalized_merchant,
                 normalize_context_text(self.category_name),
-                normalize_context_text(self.subcategory_name),
+                normalize_context_text(self.subcategory_name or ""),
                 "" if self.parent_category_id is None else str(self.parent_category_id),
                 self.research_packet_sha256,
             ]
@@ -712,10 +713,13 @@ class CategorySuggestion:
                 "evidence_urls and context_fingerprints must be lists"
             )
         raw_parent = data["parent_category_id"]
+        raw_subcategory = data["subcategory_name"]
         suggestion = cls(
             normalized_merchant=str(data["normalized_merchant"]),
             category_name=str(data["category_name"]),
-            subcategory_name=str(data["subcategory_name"]),
+            subcategory_name=(
+                None if raw_subcategory is None else str(raw_subcategory)
+            ),
             rationale=str(data["rationale"]),
             evidence_urls=tuple(str(url) for url in urls),
             research_packet_sha256=str(data["research_packet_sha256"]),
@@ -753,6 +757,16 @@ def _store_root(root: Path | None) -> Path:
     return Path(root) if root is not None else repo_root()
 
 
+def _artifact_names(database: str) -> tuple[str, str, str]:
+    """``(packet directory, review file, suggestion file)`` for one database."""
+    try:
+        return RESEARCH_ARTIFACTS[database]
+    except KeyError:
+        raise ResearchStoreError(
+            f"no research store for database {database!r}"
+        ) from None
+
+
 def _require_packet_id(value: object) -> str:
     if not isinstance(value, str) or not _PACKET_ID_PATTERN.match(value):
         # V11: the filename is the packet id and nothing else, so a non-digest
@@ -761,20 +775,22 @@ def _require_packet_id(value: object) -> str:
     return value
 
 
-def packet_path_for(packet_id: str, *, root: Path | None = None) -> Path:
+def packet_path_for(
+    packet_id: str, *, root: Path | None = None, database: str = "finance"
+) -> Path:
     """Path of one packet file, keyed by packet id alone (V11)."""
 
     return (
         _store_root(root)
-        / PRIVATE_RESEARCH_DIRNAME
+        / _artifact_names(database)[0]
         / f"{_require_packet_id(packet_id)}.json"
     )
 
 
-def review_records_path(*, root: Path | None = None) -> Path:
+def review_records_path(*, root: Path | None = None, database: str = "finance") -> Path:
     """Path of the ignored research review artifact (V11, V52)."""
 
-    return _store_root(root) / RESEARCH_REVIEW_FILENAME
+    return _store_root(root) / _artifact_names(database)[1]
 
 
 @contextmanager
@@ -829,7 +845,9 @@ def _atomic_write(path: Path, payload: bytes) -> None:
             os.close(directory)
 
 
-def load_packet(packet_id: str, *, root: Path | None = None) -> ResearchPacket:
+def load_packet(
+    packet_id: str, *, root: Path | None = None, database: str = "finance"
+) -> ResearchPacket:
     """Read and verify a stored packet (V15, V57).
 
     A version-drifted packet loads and reports ``is_stale()``; a packet whose
@@ -837,7 +855,7 @@ def load_packet(packet_id: str, *, root: Path | None = None) -> ResearchPacket:
     ``ResearchPacketTamperedError`` instead.
     """
 
-    path = packet_path_for(packet_id, root=root)
+    path = packet_path_for(packet_id, root=root, database=database)
     try:
         raw = path.read_bytes()
     except FileNotFoundError as exc:
@@ -855,22 +873,24 @@ def load_packet(packet_id: str, *, root: Path | None = None) -> ResearchPacket:
 
 
 def load_packet_if_present(
-    packet_id: str, *, root: Path | None = None
+    packet_id: str, *, root: Path | None = None, database: str = "finance"
 ) -> ResearchPacket | None:
     try:
-        return load_packet(packet_id, root=root)
+        return load_packet(packet_id, root=root, database=database)
     except ResearchPacketMissingError:
         return None
 
 
-def list_packet_ids(*, root: Path | None = None) -> tuple[str, ...]:
+def list_packet_ids(
+    *, root: Path | None = None, database: str = "finance"
+) -> tuple[str, ...]:
     """Every stored packet id, sorted for deterministic reporting.
 
     The repository-root directory is the only source of truth, so a packet is
     never discovered through an index that could drift from the files.
     """
 
-    directory = _store_root(root) / PRIVATE_RESEARCH_DIRNAME
+    directory = _store_root(root) / _artifact_names(database)[0]
     try:
         entries = sorted(directory.iterdir())
     except FileNotFoundError:
@@ -886,7 +906,9 @@ def list_packet_ids(*, root: Path | None = None) -> tuple[str, ...]:
     )
 
 
-def store_packet(packet: ResearchPacket, *, root: Path | None = None) -> Path:
+def store_packet(
+    packet: ResearchPacket, *, root: Path | None = None, database: str = "finance"
+) -> Path:
     """Locked atomic create-or-replace of complete evidence (V13, V60).
 
     An existing packet is only ever replaced here, which is exactly the
@@ -899,7 +921,7 @@ def store_packet(packet: ResearchPacket, *, root: Path | None = None) -> Path:
     if packet.status is not PacketStatus.COMPLETE:
         raise ResearchStoreError("use store_failure_packet for a failed packet")
 
-    path = packet_path_for(packet.packet_id, root=root)
+    path = packet_path_for(packet.packet_id, root=root, database=database)
     with research_writer_lock(root=root):
         # Order matters, because these are two independent atomic writes. A
         # crash between them must never leave a new packet carrying a record
@@ -908,13 +930,13 @@ def store_packet(packet: ResearchPacket, *, root: Path | None = None) -> Path:
         # and never offer it for re-review. Discarding first inverts the
         # residual state to "previous packet, no record", which reads as
         # pending and fails closed.
-        _discard_review_record(packet.packet_id, root=root)
+        _discard_review_record(packet.packet_id, root=root, database=database)
         _atomic_write(path, _canonical_bytes(packet.as_dict()))
     return path
 
 
 def store_failure_packet(
-    packet: ResearchPacket, *, root: Path | None = None
+    packet: ResearchPacket, *, root: Path | None = None, database: str = "finance"
 ) -> Path | None:
     """Persist a typed failure only when no live evidence exists (V55, V60).
 
@@ -927,23 +949,27 @@ def store_failure_packet(
     if packet.status is not PacketStatus.FAILED:
         raise ResearchStoreError("store_failure_packet requires a failed packet")
 
-    path = packet_path_for(packet.packet_id, root=root)
+    path = packet_path_for(packet.packet_id, root=root, database=database)
     with research_writer_lock(root=root):
-        existing = load_packet_if_present(packet.packet_id, root=root)
+        existing = load_packet_if_present(
+            packet.packet_id, root=root, database=database
+        )
         if existing is not None and existing.status is PacketStatus.COMPLETE:
             return None
         _atomic_write(path, _canonical_bytes(packet.as_dict()))
     return path
 
 
-def load_review_records(*, root: Path | None = None) -> dict[str, PacketReviewRecord]:
+def load_review_records(
+    *, root: Path | None = None, database: str = "finance"
+) -> dict[str, PacketReviewRecord]:
     """Read the review artifact, keyed by packet id (V52).
 
     Each stored record repeats its own ``packet_id`` so a record cannot be
     silently re-pointed at another packet by editing the mapping key.
     """
 
-    path = review_records_path(root=root)
+    path = review_records_path(root=root, database=database)
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
@@ -974,12 +1000,18 @@ def load_review_records(*, root: Path | None = None) -> dict[str, PacketReviewRe
 
 
 def review_record_for(
-    packet_id: str, *, root: Path | None = None
+    packet_id: str, *, root: Path | None = None, database: str = "finance"
 ) -> PacketReviewRecord | None:
-    return load_review_records(root=root).get(_require_packet_id(packet_id))
+    records = load_review_records(root=root, database=database)
+    return records.get(_require_packet_id(packet_id))
 
 
-def record_review(record: PacketReviewRecord, *, root: Path | None = None) -> Path:
+def record_review(
+    record: PacketReviewRecord,
+    *,
+    root: Path | None = None,
+    database: str = "finance",
+) -> Path:
     """Store one exact-hash approval or rejection under the writer lock (V50).
 
     The artifact holds no page content: only the decision, its bound hashes and
@@ -989,9 +1021,9 @@ def record_review(record: PacketReviewRecord, *, root: Path | None = None) -> Pa
     if not isinstance(record, PacketReviewRecord):
         raise ResearchStoreError("record must be a PacketReviewRecord")
 
-    path = review_records_path(root=root)
+    path = review_records_path(root=root, database=database)
     with research_writer_lock(root=root):
-        records = load_review_records(root=root)
+        records = load_review_records(root=root, database=database)
         records[record.packet_id] = record
         _write_review_records(path, records)
     return path
@@ -1006,17 +1038,19 @@ def _write_review_records(
     _atomic_write(path, _canonical_bytes(payload))
 
 
-def _discard_review_record(packet_id: str, *, root: Path | None = None) -> None:
+def _discard_review_record(
+    packet_id: str, *, root: Path | None = None, database: str = "finance"
+) -> None:
     """A successful refresh returns the packet to pending review (V52, V60).
 
     A failed refresh never reaches this point, so the prior record survives it.
     """
 
-    records = load_review_records(root=root)
+    records = load_review_records(root=root, database=database)
     if packet_id not in records:
         return
     del records[packet_id]
-    _write_review_records(review_records_path(root=root), records)
+    _write_review_records(review_records_path(root=root, database=database), records)
 
 
 # --------------------------------------------------------------------------- #
@@ -1099,16 +1133,25 @@ class SuggestionArtifact:
         return cls(merchants=merchants, schema_version=str(data["schema_version"]))
 
 
-def suggestion_records_path(*, root: Path | None = None) -> Path:
+def suggestion_records_path(
+    *, root: Path | None = None, database: str = "finance"
+) -> Path:
     """Path of the ignored private suggestion artifact (V11, V24)."""
 
-    return _store_root(root) / SUGGESTION_FILENAME
+    return _store_root(root) / _artifact_names(database)[2]
 
 
-def load_suggestion_artifact(*, root: Path | None = None) -> SuggestionArtifact:
+def _fits_database(suggestion: CategorySuggestion, database: str) -> bool:
+    """Only the one-level parents taxonomy leaves the subcategory null."""
+    return (suggestion.subcategory_name is None) == (database == "parents_finance")
+
+
+def load_suggestion_artifact(
+    *, root: Path | None = None, database: str = "finance"
+) -> SuggestionArtifact:
     """Read the suggestion artifact; an absent file is an empty artifact."""
 
-    path = suggestion_records_path(root=root)
+    path = suggestion_records_path(root=root, database=database)
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
@@ -1124,15 +1167,25 @@ def load_suggestion_artifact(*, root: Path | None = None) -> SuggestionArtifact:
         ) from exc
     if not isinstance(document, Mapping):
         raise ResearchPacketMalformedError("suggestion artifact must be an object")
-    return SuggestionArtifact.from_dict(document)
+    artifact = SuggestionArtifact.from_dict(document)
+    if not all(
+        _fits_database(suggestion, database)
+        for suggestions in artifact.merchants.values()
+        for suggestion in suggestions
+    ):
+        raise ResearchPacketMalformedError(
+            f"suggestion artifact holds a proposal that does not fit {database}"
+        )
+    return artifact
 
 
 def load_suggestions(
-    *, root: Path | None = None
+    *, root: Path | None = None, database: str = "finance"
 ) -> dict[str, tuple[CategorySuggestion, ...]]:
     """Suggestions grouped by normalized merchant (V24)."""
 
-    return dict(load_suggestion_artifact(root=root).merchants)
+    artifact = load_suggestion_artifact(root=root, database=database)
+    return dict(artifact.merchants)
 
 
 def _merge_suggestion(
@@ -1161,7 +1214,10 @@ def _merge_suggestion(
 
 
 def record_suggestion(
-    suggestion: CategorySuggestion, *, root: Path | None = None
+    suggestion: CategorySuggestion,
+    *,
+    root: Path | None = None,
+    database: str = "finance",
 ) -> CategorySuggestion:
     """Persist one grouped proposal under the writer lock (V22, V24).
 
@@ -1172,9 +1228,11 @@ def record_suggestion(
     if not isinstance(suggestion, CategorySuggestion):
         raise ResearchStoreError("suggestion must be a CategorySuggestion")
 
-    path = suggestion_records_path(root=root)
+    path = suggestion_records_path(root=root, database=database)
+    if not _fits_database(suggestion, database):
+        raise ResearchStoreError(f"suggestion does not fit the {database} taxonomy")
     with research_writer_lock(root=root):
-        artifact = load_suggestion_artifact(root=root)
+        artifact = load_suggestion_artifact(root=root, database=database)
         merged, stored = _merge_suggestion(
             artifact.merchants.get(suggestion.normalized_merchant, ()), suggestion
         )

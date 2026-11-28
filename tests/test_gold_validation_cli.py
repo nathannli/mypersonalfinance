@@ -11,6 +11,7 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -20,10 +21,22 @@ from services.gold_validator import (
     EnrichedValidationResult,
     write_approval_record as real_write_approval_record,
 )
-from services.transaction_categorization import CategorizationResult, ProviderAction
+from services.llm_categorizer import EnrichedExecution, EnrichedSelect
+from services.research_packets import (
+    FetchedPage,
+    PacketStatus,
+    ResearchPacket,
+    SearchResult,
+)
+from services.transaction_categorization import (
+    CategorizationResult,
+    ProviderAction,
+    build_canonical_context,
+)
 from services.transaction_llm_approval import (
     REQUIRED_PASSES,
     ApprovalError,
+    EnrichedGoldCase,
     parse_gold_cases,
 )
 
@@ -185,13 +198,13 @@ class TestApprovedRun(RunnerTestCase):
         self.assertTrue(wiring.written["finance"].exists())
 
     def test_approval_document_holds_only_selected_database(self):
-        wiring = self.wire("parents_finance")
+        wiring = self.wire("finance")
 
-        code, _ = self.run_main("parents_finance", wiring)
+        code, _ = self.run_main("finance", wiring)
 
         self.assertEqual(code, 0)
         document = json.loads(self.approval_path.read_text(encoding="utf-8"))
-        self.assertEqual(sorted(document), ["parents_finance"])
+        self.assertEqual(sorted(document), ["finance"])
 
 
 class TestFailedRun(RunnerTestCase):
@@ -229,9 +242,9 @@ class TestModelSelection(RunnerTestCase):
     """V51: each protocol validates with the exact model its path calls."""
 
     def test_legacy_run_validates_with_the_unenriched_model(self):
-        wiring = self.wire("parents_finance")
+        wiring = self.wire("finance")
 
-        code, _ = self.run_main("parents_finance", wiring)
+        code, _ = self.run_main("finance", wiring)
 
         self.assertEqual(code, 0)
         # The factory is resolved once per run; one fresh categorizer per pass.
@@ -284,7 +297,7 @@ class TestModelSelection(RunnerTestCase):
         self.assertEqual(written["model"], "enriched-model-id")
         self.assertEqual(written["database"], "finance")
 
-    def test_enriched_rejects_a_non_finance_database(self):
+    def test_legacy_parents_validation_is_refused_naming_enriched(self):
         wiring = self.wire("parents_finance")
 
         with (
@@ -295,11 +308,229 @@ class TestModelSelection(RunnerTestCase):
         ):
             buffer = io.StringIO()
             with redirect_stdout(buffer):
-                code = runner.main(["--database", "parents_finance", "--enriched"])
+                code = runner.main(["--database", "parents_finance"])
 
         self.assertEqual(code, 1)
-        self.assertIn("finance", buffer.getvalue())
-        self.assertEqual(wiring.written, {})
+        self.assertIn("--enriched", buffer.getvalue())
+        self.assertEqual(wiring.factory_calls, [])
+
+
+PARENTS_CHOICES = [
+    {"category_id": 1, "category_name": "Groceries"},
+    {"category_id": 2, "category_name": "Cash"},
+]
+
+
+def parents_packet(merchant):
+    return ResearchPacket(
+        normalized_merchant=merchant,
+        derived_query="synthetic",
+        status=PacketStatus.COMPLETE,
+        searched_at="2026-09-17T12:00:00+00:00",
+        search_results=(
+            SearchResult(
+                position=0,
+                site_name="Acme",
+                title="Acme",
+                snippet="s",
+                url="https://acme.example/",
+            ),
+        ),
+        fetched_pages=(
+            FetchedPage(
+                url="https://acme.example/",
+                final_url="https://acme.example/",
+                title="Acme",
+                description="d",
+                text="t",
+                relevance_matched_tokens=("acme",),
+            ),
+        ),
+    )
+
+
+def parents_case(merchant, choice_id, statement_category=None):
+    packet = parents_packet(merchant)
+    context = build_canonical_context(
+        database="parents_finance",
+        merchant=merchant,
+        amount="10.00",
+        statement_category=statement_category,
+        allowed_choices=PARENTS_CHOICES,
+        research_packet_sha256=packet.packet_sha256,
+        research_packet_schema_version=packet.schema_version,
+        research_packet_query_version=packet.query_version,
+    )
+    return EnrichedGoldCase(
+        database="parents_finance",
+        fingerprint=context.fingerprint,
+        merchant=context.merchant,
+        amount_minor_units=1000,
+        statement_category=context.statement_category,
+        research_packet_sha256=packet.packet_sha256,
+        packet_schema_version=packet.schema_version,
+        packet_query_version=packet.query_version,
+        expected_action="select",
+        expected_choice_id=choice_id,
+    )
+
+
+class ParentsReplayDB:
+    """Rules are keyed by the exact raw spelling, as in the live table."""
+
+    expenses: list = []
+    exact: dict = {}
+    substrings: dict = {}
+
+    def __init__(self, debug=False):
+        pass
+
+    def get_categorization_choices(self):
+        return PARENTS_CHOICES
+
+    def select(self, query, args=None):
+        if "auto_match" in query:
+            return [(name,) for name in self.exact]
+        return [(merchant, Decimal("10.00")) for merchant in self.expenses]
+
+    def get_auto_match_category(self, merchant):
+        return self.exact.get(merchant) or self.get_substring_auto_match_category(
+            merchant
+        )
+
+    def get_substring_auto_match_category(self, merchant):
+        matches = [
+            category
+            for pattern, category in self.substrings.items()
+            if pattern in merchant.lower()
+        ]
+        if len(matches) > 1:
+            raise ValueError("ambiguous")
+        return matches[0] if matches else None
+
+
+class TestParentsEnrichedValidation(unittest.TestCase):
+    """V2/V3/V14: replay classifies like the loader; held rows stay local."""
+
+    def run_main(self, case, *, expenses=(), exact=None, substrings=None):
+        database = type(
+            "DB",
+            (ParentsReplayDB,),
+            {
+                "expenses": list(expenses),
+                "exact": exact or {},
+                "substrings": substrings or {},
+            },
+        )
+        calls = []
+        written = {}
+
+        class Categorizer:
+            provider_call_count = 0
+            cache_hit_count = 0
+            circuit_open = False
+
+            def categorize_enriched(self, context, packet):
+                self.provider_call_count += 1
+                calls.append(context.merchant)
+                return EnrichedExecution(
+                    decision=EnrichedSelect(
+                        case.expected_choice_id,
+                        ("https://acme.example/",),
+                        context.fingerprint,
+                    )
+                )
+
+        def resolver(merchant, *, database):
+            self.assertEqual(database, "parents_finance")
+            return SimpleNamespace(packet=parents_packet(merchant))
+
+        with (
+            patch.object(runner, "Config", fake_config),
+            patch.object(runner, "DATABASE_CLASSES", {"parents_finance": database}),
+            patch.object(runner, "load_enriched_gold_cases", lambda *a, **k: [case]),
+            patch.object(runner, "resolve_approved_packet", resolver),
+            patch.object(
+                runner,
+                "production_categorizer_factory",
+                lambda config, model=None: Categorizer,
+            ),
+            patch.object(
+                runner,
+                "write_enriched_approval_record",
+                lambda **kwargs: written.update(kwargs) or Path("approval.json"),
+            ),
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = runner.main(["--database", "parents_finance", "--enriched"])
+        return code, buffer.getvalue(), calls, written
+
+    def test_unmatched_case_goes_to_the_model_three_times(self):
+        code, _, calls, written = self.run_main(parents_case("acme widgets", 1))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(written["database"], "parents_finance")
+        self.assertEqual(written["model"], "enriched-model-id")
+
+    def test_held_cases_fail_without_a_provider_call(self):
+        for merchant in ("cad draft jane example", "td atm w/d 004"):
+            with self.subTest(merchant=merchant):
+                code, output, calls, written = self.run_main(parents_case(merchant, 1))
+
+                self.assertEqual(code, 1)
+                self.assertIn("manual", output)
+                self.assertEqual((calls, written), ([], {}))
+
+    def test_a_rule_matched_cash_case_is_checked_without_the_model(self):
+        code, output, calls, _ = self.run_main(
+            parents_case("td atm w/d 004", 2),
+            expenses=["TD ATM W/D 004"],
+            exact={"TD ATM W/D 004": "Cash"},
+        )
+
+        self.assertIn("deterministic:2 ok", output)
+        self.assertEqual(calls, [])
+        # No case passed through the model, so the writer decides; here faked.
+        self.assertEqual(code, 0)
+
+    def test_statement_category_replays_first(self):
+        _, output, calls, _ = self.run_main(
+            parents_case("acme widgets", 2, statement_category="Cash")
+        )
+
+        self.assertIn("deterministic:2 ok", output)
+        self.assertEqual(calls, [])
+
+    def test_ambiguous_spelling_leaves_only_substring_rules(self):
+        case = parents_case("acme widgets", 2)
+        _, output, calls, _ = self.run_main(
+            case,
+            expenses=["ACME WIDGETS", "Acme  Widgets"],
+            exact={"ACME WIDGETS": "Groceries"},
+            substrings={"acme": "Cash"},
+        )
+
+        self.assertIn("deterministic:2 ok", output)
+        self.assertEqual(calls, [])
+
+    def test_a_rule_spelling_is_recovered_from_auto_match(self):
+        _, output, calls, _ = self.run_main(
+            parents_case("acme widgets", 1), exact={"ACME WIDGETS": "Groceries"}
+        )
+
+        self.assertIn("deterministic:1 ok", output)
+        self.assertEqual(calls, [])
+
+    def test_invalid_mapping_fails_the_pass(self):
+        code, output, calls, written = self.run_main(
+            parents_case("acme widgets", 1), substrings={"acme": "Removed"}
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("MISMATCH", output)
+        self.assertEqual((calls, written), ([], {}))
 
 
 class TestOutputPrivacy(RunnerTestCase):

@@ -16,6 +16,7 @@ from pathlib import Path
 from services.deterministic_categorization import (
     DeterministicOutcome,
     resolve_deterministic_choice,
+    resolve_parents_choice,
 )
 from services.manual_etransfers import (
     MANUAL_CONTEXT_PREFIXES as MANUAL_CONTEXT_PREFIXES,
@@ -148,7 +149,8 @@ def split_targets(
     *,
     card_type: str,
     choices: Sequence[Mapping[str, object]],
-    auto_match: Callable[[str], tuple[str, str] | None],
+    auto_match: Callable[[str], object],
+    database: str = "finance",
 ) -> tuple[tuple[ResearchTarget, ...], tuple[str, ...]]:
     """``(research targets, held-for-manual merchants)`` (V2, V4, V45).
 
@@ -158,7 +160,7 @@ def split_targets(
     honour, so researching the merchant would paper over a data bug that needs
     a human.
 
-    ``MANUAL_CONTEXT_PREFIXES`` rows are returned separately and never become
+    Manual-context rows (per database) are returned separately and never become
     targets: their reason is not on the web, so the caller must ask the user.
     """
 
@@ -168,20 +170,27 @@ def split_targets(
         merchant = row.get("merchant")
         if not isinstance(merchant, str) or not merchant.strip():
             continue
-        resolution = resolve_deterministic_choice(
-            card_type=card_type,
-            cc_category=_optional_text(row.get("cc_category")),
-            choices=choices,
-            auto_match=lambda merchant=merchant: auto_match(merchant),
-            merchant=merchant,
-            amount=row.get("cost"),
-        )
+        cc_category = _optional_text(row.get("cc_category"))
+        lookup = lambda merchant=merchant: auto_match(merchant)  # noqa: E731
+        if database == "parents_finance":
+            resolution = resolve_parents_choice(
+                cc_category=cc_category, choices=choices, auto_match=lookup
+            )
+        else:
+            resolution = resolve_deterministic_choice(
+                card_type=card_type,
+                cc_category=cc_category,
+                choices=choices,
+                auto_match=lookup,
+                merchant=merchant,
+                amount=row.get("cost"),
+            )
         if resolution.outcome is not DeterministicOutcome.NO_MATCH:
             continue
         normalized = normalize_context_text(merchant)
         if not normalized:
             continue
-        if needs_manual_context(normalized):
+        if needs_manual_context(normalized, database):
             manual.setdefault(normalized, None)
             continue
         if normalized in seen:
@@ -195,19 +204,24 @@ def discover_targets(
     *,
     card_type: str,
     choices: Sequence[Mapping[str, object]],
-    auto_match: Callable[[str], tuple[str, str] | None],
+    auto_match: Callable[[str], object],
+    database: str = "finance",
 ) -> tuple[ResearchTarget, ...]:
     """The deduplicated merchants this run should research (V2, V4, V45)."""
 
     return split_targets(
-        rows, card_type=card_type, choices=choices, auto_match=auto_match
+        rows,
+        card_type=card_type,
+        choices=choices,
+        auto_match=auto_match,
+        database=database,
     )[0]
 
 
 def review_status_for(
-    packet_id: str, *, root: Path | None = None
+    packet_id: str, *, root: Path | None = None, database: str = "finance"
 ) -> PacketReviewStatus:
-    record = review_record_for(packet_id, root=root)
+    record = review_record_for(packet_id, root=root, database=database)
     return record.status if record is not None else PacketReviewStatus.PENDING
 
 
@@ -217,6 +231,7 @@ def run_target(
     client: TinyFishClient,
     refresh: bool = False,
     root: Path | None = None,
+    database: str = "finance",
 ) -> ResearchTargetResult:
     """Perform the operation this run requested for one target.
 
@@ -226,7 +241,7 @@ def run_target(
     """
 
     packet_id = target.packet_id
-    existing = load_packet_if_present(packet_id, root=root)
+    existing = load_packet_if_present(packet_id, root=root, database=database)
 
     if not refresh:
         if existing is not None and existing.status is PacketStatus.COMPLETE:
@@ -240,10 +255,12 @@ def run_target(
                     packet_id=packet_id,
                     packet_sha256=existing.packet_sha256,
                     status=existing.status,
-                    review_status=review_status_for(packet_id, root=root),
+                    review_status=review_status_for(
+                        packet_id, root=root, database=database
+                    ),
                     failure_reason=UnresolvedReason.RESEARCH_STALE,
                 )
-            return _reused(target, existing, root=root)
+            return _reused(target, existing, root=root, database=database)
         # Missing, or a typed failure packet with no usable evidence (V55).
         operation = TargetOperation.RESEARCH
     else:
@@ -254,7 +271,7 @@ def run_target(
     except Exception as error:  # noqa: BLE001 - typed below
         reason = _reason_for(error)
     else:
-        store_packet(packet, root=root)
+        store_packet(packet, root=root, database=database)
         return ResearchTargetResult(
             normalized_merchant=target.normalized_merchant,
             operation=operation,
@@ -270,10 +287,15 @@ def run_target(
     preserved = False
     if operation is TargetOperation.REFRESH:
         preserved = (
-            store_failure_packet(_failure_packet(target, reason), root=root) is None
+            store_failure_packet(
+                _failure_packet(target, reason), root=root, database=database
+            )
+            is None
         )
     else:
-        store_failure_packet(_failure_packet(target, reason), root=root)
+        store_failure_packet(
+            _failure_packet(target, reason), root=root, database=database
+        )
 
     return ResearchTargetResult(
         normalized_merchant=target.normalized_merchant,
@@ -282,7 +304,7 @@ def run_target(
         packet_id=packet_id,
         packet_sha256=existing.packet_sha256 if existing is not None else None,
         status=existing.status if existing is not None else PacketStatus.FAILED,
-        review_status=review_status_for(packet_id, root=root),
+        review_status=review_status_for(packet_id, root=root, database=database),
         failure_reason=reason,
         preserved_previous_packet=preserved,
     )
@@ -294,9 +316,10 @@ def run_targets(
     client: TinyFishClient,
     refresh: bool = False,
     root: Path | None = None,
+    database: str = "finance",
 ) -> tuple[ResearchTargetResult, ...]:
     return tuple(
-        run_target(target, client=client, refresh=refresh, root=root)
+        run_target(target, client=client, refresh=refresh, root=root, database=database)
         for target in targets
     )
 
@@ -341,7 +364,11 @@ def summarize(results: Sequence[ResearchTargetResult]) -> ResearchRunSummary:
 
 
 def _reused(
-    target: ResearchTarget, existing: ResearchPacket, *, root: Path | None
+    target: ResearchTarget,
+    existing: ResearchPacket,
+    *,
+    root: Path | None,
+    database: str,
 ) -> ResearchTargetResult:
     return ResearchTargetResult(
         normalized_merchant=target.normalized_merchant,
@@ -350,7 +377,9 @@ def _reused(
         packet_id=existing.packet_id,
         packet_sha256=existing.packet_sha256,
         status=existing.status,
-        review_status=review_status_for(existing.packet_id, root=root),
+        review_status=review_status_for(
+            existing.packet_id, root=root, database=database
+        ),
     )
 
 
