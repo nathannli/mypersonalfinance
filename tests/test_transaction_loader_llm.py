@@ -46,7 +46,8 @@ class TestTransactionLlmConfig(unittest.TestCase):
             {"POSTGRES_CONNECTION_STRING": "postgresql://example"},
             clear=True,
         ):
-            config = Config()
+            with patch("config.load_dotenv"):
+                config = Config()
 
         self.assertEqual(
             config.enriched_transaction_llm_model, "anthropic/claude-haiku-4-5"

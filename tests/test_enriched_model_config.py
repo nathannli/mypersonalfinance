@@ -49,7 +49,8 @@ class TestConfigModelDefaults(unittest.TestCase):
         with patch.dict(
             os.environ, {"POSTGRES_CONNECTION_STRING": "postgresql://x"}, clear=True
         ):
-            config = Config()
+            with patch("config.load_dotenv"):
+                config = Config()
 
         self.assertEqual(
             config.enriched_transaction_llm_model, "anthropic/claude-haiku-4-5"
